@@ -173,6 +173,44 @@ func (p *Partition) LogEndOffset() int64 {
 	return p.activeSegment.NextOffset()
 }
 
+// AppendRaw writes raw record batch bytes to the partition without decode/re-encode.
+func (p *Partition) AppendRaw(data []byte, recordCount int32, maxTimestamp int64) (int64, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.closed {
+		return 0, ErrStorageClosed
+	}
+
+	// Check if we need to roll to a new segment (inline, no segment lock needed)
+	if p.activeSegment.size >= p.activeSegment.maxBytes {
+		if err := p.rollSegment(); err != nil {
+			return 0, fmt.Errorf("failed to roll segment: %w", err)
+		}
+	}
+
+	// Append raw bytes directly (skip segment lock — partition lock provides exclusion)
+	baseOffset, err := p.activeSegment.appendRawLocked(data, recordCount, maxTimestamp)
+	if err != nil {
+		if err == ErrSegmentFull {
+			if err := p.rollSegment(); err != nil {
+				return 0, fmt.Errorf("failed to roll segment: %w", err)
+			}
+			baseOffset, err = p.activeSegment.appendRawLocked(data, recordCount, maxTimestamp)
+			if err != nil {
+				return 0, err
+			}
+		} else {
+			return 0, err
+		}
+	}
+
+	// Update high watermark (direct field access, no segment lock)
+	p.highWatermark = p.activeSegment.nextOffset
+
+	return baseOffset, nil
+}
+
 // Append writes records to the partition
 func (p *Partition) Append(records []Record) (int64, error) {
 	p.mu.Lock()

@@ -40,6 +40,7 @@ func (h *RequestHandler) handleApiVersions(req *Request) *Response {
 		{int16(protocol.ApiKeyCreateTopics), 0, 4},    // v5+ uses flexible
 		{int16(protocol.ApiKeyDeleteTopics), 0, 4},
 		{int16(protocol.ApiKeyInitProducerId), 0, 2},  // needed for idempotent producers
+		{int16(protocol.ApiKeyDeleteGroups), 0, 1},
 	}
 
 	w.WriteArrayLen(int32(len(versions)))

@@ -26,11 +26,44 @@ type BrokerConfig struct {
 
 // StorageConfig contains storage-specific settings
 type StorageConfig struct {
+	// Backend selects the storage engine: "file" (default), "s3", "redis", "infinispan".
+	Backend        string        `yaml:"backend"`
 	DataDir        string        `yaml:"data_dir"`
 	SegmentSizeMB  int           `yaml:"segment_size_mb"`
 	RetentionHours int           `yaml:"retention_hours"`
 	SyncWrites     bool          `yaml:"sync_writes"`
 	FlushInterval  time.Duration `yaml:"flush_interval"`
+
+	// Backend-specific configuration (only the selected backend needs to be set)
+	S3         S3Config         `yaml:"s3"`
+	Redis      RedisConfig      `yaml:"redis"`
+	Infinispan InfinispanConfig `yaml:"infinispan"`
+}
+
+// S3Config contains settings for the S3 storage backend.
+type S3Config struct {
+	Bucket    string `yaml:"bucket"`
+	Prefix    string `yaml:"prefix"`
+	Region    string `yaml:"region"`
+	Endpoint  string `yaml:"endpoint"`
+	AccessKey string `yaml:"access_key"`
+	SecretKey string `yaml:"secret_key"`
+}
+
+// RedisConfig contains settings for the Redis storage backend.
+type RedisConfig struct {
+	Addr      string `yaml:"addr"`
+	Password  string `yaml:"password"`
+	DB        int    `yaml:"db"`
+	KeyPrefix string `yaml:"key_prefix"`
+}
+
+// InfinispanConfig contains settings for the Infinispan storage backend.
+type InfinispanConfig struct {
+	URL       string `yaml:"url"`
+	CacheName string `yaml:"cache_name"`
+	Username  string `yaml:"username"`
+	Password  string `yaml:"password"`
 }
 
 // DefaultsConfig contains default topic settings
@@ -57,6 +90,7 @@ func Default() *Config {
 			ClusterID: "horizon-cluster",
 		},
 		Storage: StorageConfig{
+			Backend:        "file",
 			DataDir:        "./data",
 			SegmentSizeMB:  1024,
 			RetentionHours: 168, // 7 days

@@ -68,8 +68,8 @@ type Broker struct {
 
 	config BrokerConfig
 
-	// Storage layer
-	log *storage.Log
+	// Storage layer (pluggable: file, S3, Redis, Infinispan, …)
+	log storage.StorageEngine
 
 	// Topic configurations
 	topicConfigs map[string]*TopicConfig
@@ -97,22 +97,30 @@ type TopicConfig struct {
 	CleanupPolicy     string // "delete" or "compact"
 }
 
-// New creates a new broker instance
-func New(config BrokerConfig) (*Broker, error) {
-	// Create storage
-	logConfig := storage.LogConfig{
-		Dir: config.DataDir,
-		PartitionConfig: storage.PartitionConfig{
-			SegmentConfig: storage.SegmentConfig{
-				MaxBytes:           config.SegmentBytes,
-				IndexIntervalBytes: 4096,
-			},
-		},
-	}
+// New creates a new broker instance.
+// If engine is nil the default file-based storage is created from config.DataDir.
+func New(config BrokerConfig, engine ...storage.StorageEngine) (*Broker, error) {
+	var log storage.StorageEngine
 
-	log, err := storage.NewLog(logConfig)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create log: %w", err)
+	if len(engine) > 0 && engine[0] != nil {
+		log = engine[0]
+	} else {
+		// Fall back to the default file-based storage
+		logConfig := storage.LogConfig{
+			Dir: config.DataDir,
+			PartitionConfig: storage.PartitionConfig{
+				SegmentConfig: storage.SegmentConfig{
+					MaxBytes:           config.SegmentBytes,
+					IndexIntervalBytes: 4096,
+				},
+			},
+		}
+
+		var err error
+		log, err = storage.NewLog(logConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create log: %w", err)
+		}
 	}
 
 	b := &Broker{
@@ -175,6 +183,29 @@ func (b *Broker) backgroundTasks() {
 			b.log.Sync()
 		}
 	}
+}
+
+// ProduceRaw writes raw record batch bytes to a topic partition
+// without decoding/re-encoding. This is the fast-path for produce requests.
+func (b *Broker) ProduceRaw(topic string, partition int32, data []byte, recordCount int32, maxTimestamp int64) (int64, error) {
+	// Single RLock for both running check and topic existence check
+	b.mu.RLock()
+	if !b.running {
+		b.mu.RUnlock()
+		return 0, fmt.Errorf("broker not running")
+	}
+	autoCreate := b.config.AutoCreateTopics
+	needCreate := autoCreate && b.topicConfigs[topic] == nil
+	b.mu.RUnlock()
+
+	// Auto-create topic only when missing (avoids second RLock in ensureTopic)
+	if needCreate {
+		if err := b.ensureTopic(topic); err != nil {
+			return 0, err
+		}
+	}
+
+	return b.log.AppendRaw(topic, partition, data, recordCount, maxTimestamp)
 }
 
 // Produce writes records to a topic partition
@@ -263,9 +294,19 @@ func (b *Broker) DeleteTopic(name string) error {
 
 // ensureTopic creates topic if it doesn't exist
 func (b *Broker) ensureTopic(topic string) error {
+	// Fast path: read-lock check (common case - topic already exists)
+	b.mu.RLock()
+	_, exists := b.topicConfigs[topic]
+	b.mu.RUnlock()
+	if exists {
+		return nil
+	}
+
+	// Slow path: write-lock to create
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	// Double-check after acquiring write lock
 	if _, exists := b.topicConfigs[topic]; exists {
 		return nil
 	}

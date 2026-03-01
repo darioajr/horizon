@@ -5,6 +5,28 @@ import (
 	"horizon/internal/protocol"
 )
 
+// mapGroupError translates broker group errors to Kafka protocol error codes.
+func mapGroupError(err error) protocol.ErrorCode {
+	switch err {
+	case nil:
+		return protocol.ErrNone
+	case broker.ErrUnknownMember:
+		return protocol.ErrUnknownMemberId
+	case broker.ErrIllegalGeneration:
+		return protocol.ErrIllegalGeneration
+	case broker.ErrInconsistentProtocol:
+		return protocol.ErrInconsistentGroupProtocol
+	case broker.ErrRebalanceInProgress:
+		return protocol.ErrRebalanceInProgress
+	case broker.ErrGroupNotFound:
+		return protocol.ErrGroupIdNotFound
+	case broker.ErrGroupNotEmpty:
+		return protocol.ErrNonEmptyGroup
+	default:
+		return protocol.ErrUnknown
+	}
+}
+
 // handleFindCoordinator handles FindCoordinator request
 func (h *RequestHandler) handleFindCoordinator(req *Request) *Response {
 	resp := NewResponse(req.CorrelationID)
@@ -42,7 +64,7 @@ func (h *RequestHandler) handleFindCoordinator(req *Request) *Response {
 	return resp
 }
 
-// handleJoinGroup handles JoinGroup request
+// handleJoinGroup handles JoinGroup request (blocks until join phase completes)
 func (h *RequestHandler) handleJoinGroup(req *Request) *Response {
 	resp := NewResponse(req.CorrelationID)
 	w := resp.Writer
@@ -72,9 +94,10 @@ func (h *RequestHandler) handleJoinGroup(req *Request) *Response {
 		})
 	}
 
-	// Join group
+	// Join group – this call blocks until the coordinator finishes the
+	// join phase (all members joined or rebalance timeout expired).
 	group := h.broker.GetGroupManager().GetOrCreateGroup(groupID)
-	newMemberID, generation, selectedProtocol, leaderID, members, err := group.JoinGroup(
+	result := group.JoinGroup(
 		memberID, req.ClientID, "", protocolType,
 		sessionTimeoutMs, rebalanceTimeoutMs, protocols,
 	)
@@ -85,43 +108,47 @@ func (h *RequestHandler) handleJoinGroup(req *Request) *Response {
 	}
 
 	// Error code
-	if err != nil {
-		w.WriteInt16(int16(protocol.ErrUnknown))
-		w.WriteInt32(0)               // generation
-		if req.ApiVersion >= 7 {
-			w.WriteNullableString(nil)    // protocol_type
-		}
-		w.WriteString("")             // protocol
-		w.WriteString("")             // leader
-		w.WriteString(newMemberID)    // member_id
-		w.WriteArrayLen(0)            // members
-		return resp
-	}
-
-	w.WriteInt16(int16(protocol.ErrNone))
-	w.WriteInt32(generation)
+	errCode := mapGroupError(result.Error)
+	w.WriteInt16(int16(errCode))
+	w.WriteInt32(result.Generation)
 	// Protocol type (v7+)
 	if req.ApiVersion >= 7 {
-		w.WriteNullableString(&protocolType)
+		if errCode == protocol.ErrNone {
+			w.WriteNullableString(&result.ProtocolType)
+		} else {
+			w.WriteNullableString(nil)
+		}
 	}
-	w.WriteString(selectedProtocol)
-	w.WriteString(leaderID)
-	w.WriteString(newMemberID)
+	w.WriteString(result.Protocol)
+	w.WriteString(result.LeaderID)
+	w.WriteString(result.MemberID)
 
-	// Members (only for leader)
-	w.WriteArrayLen(int32(len(members)))
-	for _, m := range members {
+	// Members (only populated for the leader)
+	w.WriteArrayLen(int32(len(result.Members)))
+	for _, m := range result.Members {
 		w.WriteString(m.MemberID)
 		if req.ApiVersion >= 5 {
 			w.WriteNullableString(nil) // group_instance_id
 		}
-		w.WriteBytes(m.Protocols[0].Metadata)
+		// Find metadata for the selected protocol
+		var meta []byte
+		for _, p := range m.Protocols {
+			if p.Name == result.Protocol {
+				meta = p.Metadata
+				break
+			}
+		}
+		if meta == nil && len(m.Protocols) > 0 {
+			meta = m.Protocols[0].Metadata
+		}
+		w.WriteBytes(meta)
 	}
 
 	return resp
 }
 
-// handleSyncGroup handles SyncGroup request
+// handleSyncGroup handles SyncGroup request (blocks for followers until
+// the leader provides assignments)
 func (h *RequestHandler) handleSyncGroup(req *Request) *Response {
 	resp := NewResponse(req.CorrelationID)
 	w := resp.Writer
@@ -147,15 +174,14 @@ func (h *RequestHandler) handleSyncGroup(req *Request) *Response {
 		assignments[mid] = assignment
 	}
 
-	// Sync group
+	// Sync group – may block for followers.
 	group := h.broker.GetGroupManager().GetGroup(groupID)
-	var assignment []byte
-	var err error
 
+	var result broker.SyncResult
 	if group == nil {
-		err = broker.ErrGroupNotFound
+		result = broker.SyncResult{Error: broker.ErrGroupNotFound}
 	} else {
-		assignment, err = group.SyncGroup(memberID, generation, assignments)
+		result = group.SyncGroup(memberID, generation, assignments)
 	}
 
 	// Throttle time (v1+)
@@ -163,23 +189,13 @@ func (h *RequestHandler) handleSyncGroup(req *Request) *Response {
 		w.WriteInt32(0)
 	}
 
-	// Error code
-	if err != nil {
-		w.WriteInt16(int16(protocol.ErrUnknown))
-		if req.ApiVersion >= 5 {
-			w.WriteNullableString(nil) // protocol_type
-			w.WriteNullableString(nil) // protocol_name
-		}
-		w.WriteBytes(nil)
-		return resp
-	}
-
-	w.WriteInt16(int16(protocol.ErrNone))
+	errCode := mapGroupError(result.Error)
+	w.WriteInt16(int16(errCode))
 	if req.ApiVersion >= 5 {
 		w.WriteNullableString(nil) // protocol_type
 		w.WriteNullableString(nil) // protocol_name
 	}
-	w.WriteBytes(assignment)
+	w.WriteBytes(result.Assignment)
 
 	return resp
 }
@@ -296,6 +312,126 @@ func (h *RequestHandler) handleLeaveGroup(req *Request) *Response {
 		} else {
 			w.WriteInt16(int16(protocol.ErrNone))
 		}
+	}
+
+	return resp
+}
+
+// ---------------------------------------------------------------------------
+// DescribeGroups (API key 15, v0-v4)
+// ---------------------------------------------------------------------------
+
+// handleDescribeGroups handles DescribeGroups request
+func (h *RequestHandler) handleDescribeGroups(req *Request) *Response {
+	resp := NewResponse(req.CorrelationID)
+	w := resp.Writer
+
+	// Throttle time (v1+)
+	if req.ApiVersion >= 1 {
+		w.WriteInt32(0)
+	}
+
+	// Read group IDs
+	groupCount, _ := req.Reader.ReadArrayLen()
+	groupIDs := make([]string, groupCount)
+	for i := int32(0); i < groupCount; i++ {
+		groupIDs[i], _ = req.Reader.ReadString()
+	}
+
+	w.WriteArrayLen(groupCount)
+	for _, gid := range groupIDs {
+		group := h.broker.GetGroupManager().GetGroup(gid)
+		if group == nil {
+			w.WriteInt16(int16(protocol.ErrGroupIdNotFound))
+			w.WriteString(gid)
+			w.WriteString("")  // state
+			w.WriteString("")  // protocol_type
+			w.WriteString("")  // protocol
+			w.WriteArrayLen(0) // members
+			if req.ApiVersion >= 3 {
+				w.WriteInt32(-2147483648) // authorized_operations (unknown)
+			}
+			continue
+		}
+
+		desc := group.Describe()
+		w.WriteInt16(int16(protocol.ErrNone))
+		w.WriteString(desc.GroupID)
+		w.WriteString(desc.State.String())
+		w.WriteString(desc.ProtocolType)
+		w.WriteString(desc.Protocol)
+
+		w.WriteArrayLen(int32(len(desc.Members)))
+		for _, m := range desc.Members {
+			w.WriteString(m.MemberID)
+			if req.ApiVersion >= 4 {
+				w.WriteNullableString(nil) // group_instance_id
+			}
+			w.WriteString(m.ClientID)
+			w.WriteString(m.ClientHost)
+			w.WriteBytes(m.Metadata)
+			w.WriteBytes(m.Assignment)
+		}
+
+		if req.ApiVersion >= 3 {
+			w.WriteInt32(-2147483648) // authorized_operations (not implemented)
+		}
+	}
+
+	return resp
+}
+
+// ---------------------------------------------------------------------------
+// ListGroups (API key 16, v0-v3)
+// ---------------------------------------------------------------------------
+
+// handleListGroups handles ListGroups request
+func (h *RequestHandler) handleListGroups(req *Request) *Response {
+	resp := NewResponse(req.CorrelationID)
+	w := resp.Writer
+
+	// Throttle time (v1+)
+	if req.ApiVersion >= 1 {
+		w.WriteInt32(0)
+	}
+
+	w.WriteInt16(int16(protocol.ErrNone)) // error_code
+
+	groups := h.broker.GetGroupManager().ListGroups()
+	w.WriteArrayLen(int32(len(groups)))
+	for _, g := range groups {
+		w.WriteString(g.GroupID)
+		w.WriteString(g.ProtocolType)
+	}
+
+	return resp
+}
+
+// ---------------------------------------------------------------------------
+// DeleteGroups (API key 42, v0-v1)
+// ---------------------------------------------------------------------------
+
+// handleDeleteGroups handles DeleteGroups request
+func (h *RequestHandler) handleDeleteGroups(req *Request) *Response {
+	resp := NewResponse(req.CorrelationID)
+	w := resp.Writer
+
+	// Read group IDs
+	groupCount, _ := req.Reader.ReadArrayLen()
+	groupIDs := make([]string, groupCount)
+	for i := int32(0); i < groupCount; i++ {
+		groupIDs[i], _ = req.Reader.ReadString()
+	}
+
+	// Throttle time
+	w.WriteInt32(0)
+
+	// Results
+	w.WriteArrayLen(groupCount)
+	for _, gid := range groupIDs {
+		w.WriteString(gid)
+		err := h.broker.GetGroupManager().DeleteGroup(gid)
+		w.WriteInt16(int16(mapGroupError(err)))
 	}
 
 	return resp

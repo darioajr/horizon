@@ -259,6 +259,25 @@ func (r *Reader) ReadBytes() ([]byte, error) {
 	return bytes, nil
 }
 
+// ReadSlice returns a sub-slice of the underlying buffer without copying.
+// The returned slice is valid only as long as the Reader's data is not reused.
+// Use for zero-copy paths where the caller writes data to disk before the buffer is freed.
+func (r *Reader) ReadSlice() ([]byte, error) {
+	length, err := r.ReadInt32()
+	if err != nil {
+		return nil, err
+	}
+	if length < 0 {
+		return nil, nil
+	}
+	if r.pos+int(length) > len(r.data) {
+		return nil, ErrBufferTooShort
+	}
+	slice := r.data[r.pos : r.pos+int(length)]
+	r.pos += int(length)
+	return slice, nil
+}
+
 // ReadNullableBytes reads nullable length-prefixed bytes
 func (r *Reader) ReadNullableBytes() ([]byte, error) {
 	return r.ReadBytes()

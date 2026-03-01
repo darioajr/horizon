@@ -126,6 +126,7 @@ const (
 	ErrInvalidRequest                ErrorCode = 42
 	ErrUnsupportedForMessageFormat   ErrorCode = 43
 	ErrPolicyViolation               ErrorCode = 44
+	ErrNonEmptyGroup                 ErrorCode = 68
 	ErrGroupIdNotFound               ErrorCode = 69
 )
 

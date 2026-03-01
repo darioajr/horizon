@@ -78,7 +78,7 @@ services:
           --throughput -1 \
           --producer-props \
             bootstrap.servers=kafka:9092 \
-            acks=all \
+            acks=1 \
             batch.size=1048576 \
             linger.ms=10 \
             buffer.memory=134217728 \

@@ -17,4 +17,7 @@ var (
 
 	// ErrGroupNotFound indicates the group does not exist
 	ErrGroupNotFound = errors.New("group not found")
+
+	// ErrGroupNotEmpty indicates the group still has active members
+	ErrGroupNotEmpty = errors.New("group not empty")
 )

@@ -11,7 +11,6 @@ func (h *RequestHandler) handleProduce(req *Request) *Response {
 	w := resp.Writer
 
 	// Read request
-	// v3+ includes transactional_id before acks
 	if req.ApiVersion >= 3 {
 		_, _ = req.Reader.ReadNullableString() // transactional_id
 	}
@@ -30,27 +29,26 @@ func (h *RequestHandler) handleProduce(req *Request) *Response {
 		partitions []partitionResult
 	}
 
-	var results []topicResult
+	results := make([]topicResult, 0, topicCount)
 
 	for i := int32(0); i < topicCount; i++ {
 		topic, _ := req.Reader.ReadString()
 		partCount, _ := req.Reader.ReadArrayLen()
 
-		tr := topicResult{topic: topic}
+		tr := topicResult{topic: topic, partitions: make([]partitionResult, 0, partCount)}
 
 		for j := int32(0); j < partCount; j++ {
 			partition, _ := req.Reader.ReadInt32()
-			recordData, _ := req.Reader.ReadBytes()
+			recordData, _ := req.Reader.ReadSlice()
 
 			pr := partitionResult{partition: partition}
 
-			// Parse and append records
 			if recordData != nil {
-				batch, err := storage.DecodeRecordBatch(recordData)
+				recordCount, maxTimestamp, _, err := storage.ValidateRecordBatchHeader(recordData)
 				if err != nil {
 					pr.errorCode = protocol.ErrCorruptMessage
 				} else {
-					baseOffset, err := h.broker.Produce(topic, partition, batch.Records)
+					baseOffset, err := h.broker.ProduceRaw(topic, partition, recordData, recordCount, maxTimestamp)
 					if err != nil {
 						pr.errorCode = protocol.ErrUnknown
 					} else {
@@ -75,28 +73,21 @@ func (h *RequestHandler) handleProduce(req *Request) *Response {
 			w.WriteInt32(pr.partition)
 			w.WriteInt16(int16(pr.errorCode))
 			w.WriteInt64(pr.baseOffset)
-			// Log append time (v2+)
 			if req.ApiVersion >= 2 {
-				w.WriteInt64(-1)
+				w.WriteInt64(-1) // log append time
 			}
-			// Log start offset (v5+)
 			if req.ApiVersion >= 5 {
-				w.WriteInt64(0)
+				w.WriteInt64(0) // log start offset
 			}
-			// Record errors (v8+) - empty array
 			if req.ApiVersion >= 8 {
-				w.WriteArrayLen(0)
-			}
-			// Error message (v8+) - null
-			if req.ApiVersion >= 8 {
-				w.WriteNullableString(nil)
+				w.WriteArrayLen(0)       // record errors
+				w.WriteNullableString(nil) // error message
 			}
 		}
 	}
 
-	// Throttle time (v1+)
 	if req.ApiVersion >= 1 {
-		w.WriteInt32(0)
+		w.WriteInt32(0) // throttle time
 	}
 
 	return resp

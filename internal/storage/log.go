@@ -164,8 +164,8 @@ func (l *Log) DeleteTopic(topic string) error {
 	return nil
 }
 
-// GetPartition returns a partition by topic and partition number
-func (l *Log) GetPartition(topic string, partition int32) (*Partition, error) {
+// getPartition returns the concrete *Partition (internal use by Log methods).
+func (l *Log) getPartition(topic string, partition int32) (*Partition, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
@@ -186,8 +186,28 @@ func (l *Log) GetPartition(topic string, partition int32) (*Partition, error) {
 	return p, nil
 }
 
-// GetOrCreatePartition gets an existing partition or creates it
-func (l *Log) GetOrCreatePartition(topic string, partition int32) (*Partition, error) {
+// GetPartition returns a partition by topic and partition number
+func (l *Log) GetPartition(topic string, partition int32) (PartitionReader, error) {
+	return l.getPartition(topic, partition)
+}
+
+// getOrCreatePartition returns the concrete *Partition (internal use by Log methods).
+func (l *Log) getOrCreatePartition(topic string, partition int32) (*Partition, error) {
+	// Fast path: read-lock for existing partitions (common case)
+	l.mu.RLock()
+	if l.closed {
+		l.mu.RUnlock()
+		return nil, ErrStorageClosed
+	}
+	if partitions, exists := l.partitions[topic]; exists {
+		if p, exists := partitions[partition]; exists {
+			l.mu.RUnlock()
+			return p, nil
+		}
+	}
+	l.mu.RUnlock()
+
+	// Slow path: write-lock to create new partition
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -195,7 +215,7 @@ func (l *Log) GetOrCreatePartition(topic string, partition int32) (*Partition, e
 		return nil, ErrStorageClosed
 	}
 
-	// Check if exists
+	// Double-check after acquiring write lock
 	if partitions, exists := l.partitions[topic]; exists {
 		if p, exists := partitions[partition]; exists {
 			return p, nil
@@ -214,9 +234,24 @@ func (l *Log) GetOrCreatePartition(topic string, partition int32) (*Partition, e
 	return p, nil
 }
 
+// GetOrCreatePartition gets an existing partition or creates it
+func (l *Log) GetOrCreatePartition(topic string, partition int32) (PartitionReader, error) {
+	return l.getOrCreatePartition(topic, partition)
+}
+
+// AppendRaw writes raw record batch bytes to a partition without decode/re-encode.
+func (l *Log) AppendRaw(topic string, partition int32, data []byte, recordCount int32, maxTimestamp int64) (int64, error) {
+	p, err := l.getOrCreatePartition(topic, partition)
+	if err != nil {
+		return 0, err
+	}
+
+	return p.AppendRaw(data, recordCount, maxTimestamp)
+}
+
 // Append writes records to a partition
 func (l *Log) Append(topic string, partition int32, records []Record) (int64, error) {
-	p, err := l.GetOrCreatePartition(topic, partition)
+	p, err := l.getOrCreatePartition(topic, partition)
 	if err != nil {
 		return 0, err
 	}
@@ -226,7 +261,7 @@ func (l *Log) Append(topic string, partition int32, records []Record) (int64, er
 
 // Fetch reads records from a partition
 func (l *Log) Fetch(topic string, partition int32, offset int64, maxBytes int64) ([]*RecordBatch, error) {
-	p, err := l.GetPartition(topic, partition)
+	p, err := l.getPartition(topic, partition)
 	if err != nil {
 		return nil, err
 	}

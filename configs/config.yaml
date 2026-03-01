@@ -7,11 +7,35 @@ broker:
   cluster_id: "horizon-cluster"
 
 storage:
-  data_dir: "./data"
-  segment_size_mb: 1024        # 1GB per segment
-  retention_hours: 168         # 7 days retention
-  sync_writes: false           # Sync writes to disk
-  flush_interval: 1s           # Background flush interval
+  backend: "file"                # "file" | "s3" | "redis" | "infinispan"
+  data_dir: "./data"             # used by file backend
+  segment_size_mb: 1024          # 1GB per segment
+  retention_hours: 168           # 7 days retention
+  sync_writes: false             # Sync writes to disk
+  flush_interval: 1s             # Background flush interval
+
+  # --- S3 / MinIO backend ---
+  # s3:
+  #   bucket: "horizon-data"
+  #   prefix: ""
+  #   region: "us-east-1"
+  #   endpoint: ""               # override for MinIO, e.g. "http://minio:9000"
+  #   access_key: ""
+  #   secret_key: ""
+
+  # --- Redis backend ---
+  # redis:
+  #   addr: "localhost:6379"
+  #   password: ""
+  #   db: 0
+  #   key_prefix: "horizon"
+
+  # --- Infinispan backend ---
+  # infinispan:
+  #   url: "http://localhost:11222"
+  #   cache_name: "horizon"
+  #   username: ""
+  #   password: ""
 
 defaults:
   num_partitions: 3            # Default partitions for new topics

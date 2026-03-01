@@ -79,6 +79,10 @@ type Segment struct {
 
 	// Whether segment is closed
 	closed bool
+
+	// Reusable buffers for index writes (avoid allocations)
+	indexBuf     [8]byte
+	timeIndexBuf [12]byte
 }
 
 // SegmentConfig holds configuration for a segment
@@ -200,6 +204,65 @@ func (s *Segment) IsFull() bool {
 	return s.size >= s.maxBytes
 }
 
+// AppendRaw writes raw record batch bytes directly to the segment without
+// decoding/re-encoding. The base offset in the data is patched in-place.
+func (s *Segment) AppendRaw(data []byte, recordCount int32, maxTimestamp int64) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.appendRawLocked(data, recordCount, maxTimestamp)
+}
+
+// appendRawLocked is the lock-free version of AppendRaw.
+// MUST be called with the caller guaranteeing exclusive access (e.g. Partition.mu.Lock held).
+func (s *Segment) appendRawLocked(data []byte, recordCount int32, maxTimestamp int64) (int64, error) {
+	if s.closed {
+		return 0, ErrStorageClosed
+	}
+
+	if s.size >= s.maxBytes {
+		return 0, ErrSegmentFull
+	}
+
+	baseOffset := s.nextOffset
+
+	// Patch base offset in raw data (bytes 0-7, not covered by CRC)
+	PatchBaseOffset(data, baseOffset)
+
+	// Current position for index
+	position := s.size
+
+	// Write raw bytes directly to OS page cache (like Kafka's FileChannel.write)
+	n, err := s.logFile.Write(data)
+	if err != nil {
+		return 0, fmt.Errorf("failed to write to log: %w", err)
+	}
+
+	// Update size
+	s.size += int64(n)
+	s.bytesSinceLastIndex += int64(n)
+
+	// Add sparse index entry if interval reached
+	if s.bytesSinceLastIndex >= s.indexIntervalBytes {
+		if err := s.addIndexEntry(baseOffset, position); err != nil {
+			return 0, fmt.Errorf("failed to write index: %w", err)
+		}
+		s.bytesSinceLastIndex = 0
+	}
+
+	// Sparse time index (only when index entry is written)
+	// This avoids a file write on every single batch
+	if s.bytesSinceLastIndex == 0 {
+		if err := s.addTimeIndexEntry(maxTimestamp, baseOffset); err != nil {
+			return 0, fmt.Errorf("failed to write time index: %w", err)
+		}
+	}
+
+	// Advance next offset
+	s.nextOffset += int64(recordCount)
+
+	return baseOffset, nil
+}
+
 // Append writes a record batch to the segment
 func (s *Segment) Append(batch *RecordBatch) (int64, error) {
 	s.mu.Lock()
@@ -230,7 +293,7 @@ func (s *Segment) Append(batch *RecordBatch) (int64, error) {
 	// Current position
 	position := s.size
 
-	// Write to log file
+	// Write to log file directly to OS page cache
 	n, err := s.logFile.Write(data)
 	if err != nil {
 		return 0, fmt.Errorf("failed to write to log: %w", err)
@@ -246,11 +309,11 @@ func (s *Segment) Append(batch *RecordBatch) (int64, error) {
 			return 0, fmt.Errorf("failed to write index: %w", err)
 		}
 		s.bytesSinceLastIndex = 0
-	}
 
-	// Add time index entry
-	if err := s.addTimeIndexEntry(batch.MaxTimestamp, s.nextOffset); err != nil {
-		return 0, fmt.Errorf("failed to write time index: %w", err)
+		// Add time index entry only with index (sparse)
+		if err := s.addTimeIndexEntry(batch.MaxTimestamp, s.nextOffset); err != nil {
+			return 0, fmt.Errorf("failed to write time index: %w", err)
+		}
 	}
 
 	// Calculate next offset
@@ -270,11 +333,10 @@ func (s *Segment) addIndexEntry(offset, position int64) error {
 	s.index = append(s.index, entry)
 
 	// Write to index file (relative offset as int32, position as int32)
-	buf := make([]byte, 8)
-	binary.BigEndian.PutUint32(buf[0:4], uint32(relativeOffset))
-	binary.BigEndian.PutUint32(buf[4:8], uint32(position))
+	binary.BigEndian.PutUint32(s.indexBuf[0:4], uint32(relativeOffset))
+	binary.BigEndian.PutUint32(s.indexBuf[4:8], uint32(position))
 
-	_, err := s.indexFile.Write(buf)
+	_, err := s.indexFile.Write(s.indexBuf[:])
 	return err
 }
 
@@ -288,11 +350,10 @@ func (s *Segment) addTimeIndexEntry(timestamp, offset int64) error {
 	s.timeIndex = append(s.timeIndex, entry)
 
 	// Write to time index file
-	buf := make([]byte, 12)
-	binary.BigEndian.PutUint64(buf[0:8], uint64(timestamp))
-	binary.BigEndian.PutUint32(buf[8:12], uint32(relativeOffset))
+	binary.BigEndian.PutUint64(s.timeIndexBuf[0:8], uint64(timestamp))
+	binary.BigEndian.PutUint32(s.timeIndexBuf[8:12], uint32(relativeOffset))
 
-	_, err := s.timeIndexFile.Write(buf)
+	_, err := s.timeIndexFile.Write(s.timeIndexBuf[:])
 	return err
 }
 

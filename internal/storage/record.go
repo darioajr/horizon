@@ -262,6 +262,41 @@ func appendVarint(buf []byte, val int64) []byte {
 	return buf
 }
 
+// ValidateRecordBatchHeader validates CRC and extracts header fields from raw batch bytes
+// without decoding individual records. Returns recordCount, maxTimestamp, lastOffsetDelta.
+func ValidateRecordBatchHeader(data []byte) (recordCount int32, maxTimestamp int64, lastOffsetDelta int32, err error) {
+	if len(data) < RecordBatchHeaderSize {
+		return 0, 0, 0, ErrCorruptedData
+	}
+
+	// Batch length check
+	batchLength := int32(binary.BigEndian.Uint32(data[8:]))
+	totalLen := 12 + int(batchLength)
+	if totalLen > len(data) {
+		return 0, 0, 0, ErrCorruptedData
+	}
+
+	// CRC validation (covers from attributes at offset 21 to end)
+	storedCRC := binary.BigEndian.Uint32(data[17:])
+	computedCRC := crc32.Checksum(data[21:totalLen], crc32cTable)
+	if computedCRC != storedCRC {
+		return 0, 0, 0, ErrCRCMismatch
+	}
+
+	// Extract fields from fixed header positions
+	lastOffsetDelta = int32(binary.BigEndian.Uint32(data[23:]))
+	maxTimestamp = int64(binary.BigEndian.Uint64(data[35:]))
+	recordCount = int32(binary.BigEndian.Uint32(data[57:]))
+
+	return recordCount, maxTimestamp, lastOffsetDelta, nil
+}
+
+// PatchBaseOffset overwrites the base offset in raw record batch data (bytes 0-7).
+// BaseOffset is NOT covered by CRC, so no CRC recalculation is needed.
+func PatchBaseOffset(data []byte, baseOffset int64) {
+	binary.BigEndian.PutUint64(data[0:8], uint64(baseOffset))
+}
+
 // DecodeRecordBatch decodes a record batch from bytes
 func DecodeRecordBatch(data []byte) (*RecordBatch, error) {
 	if len(data) < RecordBatchHeaderSize {
