@@ -31,6 +31,9 @@ func (h *RequestHandler) handleProduce(req *Request) *Response {
 
 	results := make([]topicResult, 0, topicCount)
 
+	// Get cluster router (nil in standalone mode)
+	cluster := h.broker.GetCluster()
+
 	for i := int32(0); i < topicCount; i++ {
 		topic, _ := req.Reader.ReadString()
 		partCount, _ := req.Reader.ReadArrayLen()
@@ -47,6 +50,20 @@ func (h *RequestHandler) handleProduce(req *Request) *Response {
 				recordCount, maxTimestamp, _, err := storage.ValidateRecordBatchHeader(recordData)
 				if err != nil {
 					pr.errorCode = protocol.ErrCorruptMessage
+				} else if cluster != nil && !cluster.IsPartitionLocal(topic, partition) {
+					// Cluster mode: forward to the partition leader
+					leaderID, _, _, ok := cluster.GetPartitionLeader(topic, partition)
+					if !ok {
+						pr.errorCode = protocol.ErrNotLeaderForPartition
+					} else {
+						baseOffset, fwdErr := cluster.ForwardProduce(leaderID, topic, partition, recordData, recordCount, maxTimestamp)
+						if fwdErr != nil {
+							pr.errorCode = protocol.ErrNotLeaderForPartition
+						} else {
+							pr.baseOffset = baseOffset
+							pr.errorCode = protocol.ErrNone
+						}
+					}
 				} else {
 					baseOffset, err := h.broker.ProduceRaw(topic, partition, recordData, recordCount, maxTimestamp)
 					if err != nil {

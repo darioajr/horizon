@@ -130,7 +130,7 @@ func (h *RequestHandler) handleMetadata(req *Request) *Response {
 
 			// Leader epoch (v7+)
 			if req.ApiVersion >= 7 {
-				w.WriteInt32(0) // leader_epoch
+				w.WriteInt32(p.LeaderEpoch)
 			}
 
 			// Replicas

@@ -20,6 +20,14 @@ broker:
   cluster_id: "horizon-cluster"
   advertised_host: ""            # defaults to "localhost" when host is "0.0.0.0"
 
+# HTTP/HTTPS gateway (optional)
+http:
+  enabled: false                 # set to true to activate
+  host: "0.0.0.0"
+  port: 8080
+  # tls_cert_file: "/path/to/cert.pem"
+  # tls_key_file:  "/path/to/key.pem"
+
 storage:
   backend: "file"                # "file" | "s3" | "redis" | "infinispan"
   data_dir: "./data"             # used by file backend
@@ -55,6 +63,14 @@ defaults:
   num_partitions: 3              # partitions for auto-created topics
   replication_factor: 1          # replication factor (future use)
 
+# Cluster mode (optional)
+cluster:
+  enabled: false                 # set to true for multi-node deployment
+  rpc_port: 9093                 # TCP port for inter-broker RPC
+  seeds: []                      # seed node addresses, e.g. ["node2:9093", "node3:9093"]
+  gossip_interval_ms: 1000       # gossip heartbeat interval
+  failure_threshold_ms: 5000     # time before marking a node as dead
+
 performance:
   write_buffer_kb: 2048          # write buffer size
   max_connections: 10000         # max concurrent TCP connections
@@ -75,6 +91,18 @@ performance:
 | `port` | int | `9092` | TCP port for Kafka protocol connections. |
 | `cluster_id` | string | `"horizon-cluster"` | Cluster identifier returned in metadata responses. |
 | `advertised_host` | string | `""` | Host reported to clients. Defaults to `"localhost"` when `host` is `"0.0.0.0"`. Set this when running behind a load balancer or in Docker. |
+
+### `http`
+
+Optional HTTP/HTTPS gateway. See [HTTP Gateway](http-gateway.md) for full endpoint documentation.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable the HTTP gateway. |
+| `host` | string | `"0.0.0.0"` | Network interface to bind. |
+| `port` | int | `8080` | HTTP listen port. |
+| `tls_cert_file` | string | `""` | Path to TLS certificate (PEM). When both cert and key are set, the gateway runs as HTTPS. |
+| `tls_key_file` | string | `""` | Path to TLS private key (PEM). |
 
 ### `storage`
 
@@ -128,6 +156,18 @@ Only used when `backend: "infinispan"`. See [Storage Backends](storage-backends.
 |-------|------|---------|-------------|
 | `num_partitions` | int | `3` | Default number of partitions for auto-created topics. |
 | `replication_factor` | int | `1` | Default replication factor (reserved for future clustering). |
+
+### `cluster`
+
+Optional multi-node cluster mode. See [Cluster Guide](cluster.md) for architecture and deployment details.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable cluster mode. When `false`, Horizon runs as a standalone single-node broker. |
+| `rpc_port` | int | `9093` | TCP port for inter-broker RPC (request forwarding, replication, assignment broadcast). |
+| `seeds` | []string | `[]` | List of seed node addresses in `host:rpc_port` format. Used for initial gossip join. Example: `["node2:9093", "node3:9093"]`. |
+| `gossip_interval_ms` | int | `1000` | Interval (ms) between gossip heartbeat rounds. Each round pings up to 3 random peers. |
+| `failure_threshold_ms` | int | `5000` | Time (ms) without a heartbeat before a node is marked suspect, then dead. Triggers controller re-election and partition reassignment. |
 
 ### `performance`
 
@@ -188,6 +228,8 @@ When running in Docker, mount the config file and data volume:
 ```bash
 docker run -d \
   -p 9092:9092 \
+  -p 8080:8080 \
+  -p 9093:9093 \
   -v ./my-config.yaml:/app/config.yaml \
   -v horizon-data:/data \
   --name horizon \
@@ -202,6 +244,8 @@ services:
     image: horizon:latest
     ports:
       - "9092:9092"
+      - "8080:8080"
+      - "9093:9093"
     volumes:
       - ./configs/config.yaml:/app/config.yaml
       - horizon-data:/data

@@ -10,9 +10,29 @@ import (
 // Config represents the complete Horizon configuration
 type Config struct {
 	Broker      BrokerConfig      `yaml:"broker"`
+	Cluster     ClusterConfig     `yaml:"cluster"`
+	HTTP        HTTPConfig        `yaml:"http"`
 	Storage     StorageConfig     `yaml:"storage"`
 	Defaults    DefaultsConfig    `yaml:"defaults"`
 	Performance PerformanceConfig `yaml:"performance"`
+}
+
+// HTTPConfig holds settings for the optional HTTP/HTTPS gateway.
+type HTTPConfig struct {
+	Enabled     bool   `yaml:"enabled"`
+	Host        string `yaml:"host"`
+	Port        int    `yaml:"port"`
+	TLSCertFile string `yaml:"tls_cert_file"`
+	TLSKeyFile  string `yaml:"tls_key_file"`
+}
+
+// ClusterConfig holds settings for the cluster mode.
+type ClusterConfig struct {
+	Enabled            bool     `yaml:"enabled"`           // enable cluster mode (default: false = standalone)
+	RPCPort            int      `yaml:"rpc_port"`          // inter-broker RPC / gossip port
+	Seeds              []string `yaml:"seeds"`             // bootstrap peers ("host:port")
+	GossipIntervalMs   int      `yaml:"gossip_interval_ms"`   // gossip heartbeat interval (default 1000)
+	FailureThresholdMs int      `yaml:"failure_threshold_ms"` // time before marking a node dead (default 5000)
 }
 
 // BrokerConfig contains broker-specific settings
@@ -88,6 +108,18 @@ func Default() *Config {
 			Host:      "0.0.0.0",
 			Port:      9092,
 			ClusterID: "horizon-cluster",
+		},
+		Cluster: ClusterConfig{
+			Enabled:            false,
+			RPCPort:            9093,
+			Seeds:              nil,
+			GossipIntervalMs:   1000,
+			FailureThresholdMs: 5000,
+		},
+		HTTP: HTTPConfig{
+			Enabled: false,
+			Host:    "0.0.0.0",
+			Port:    8080,
 		},
 		Storage: StorageConfig{
 			Backend:        "file",

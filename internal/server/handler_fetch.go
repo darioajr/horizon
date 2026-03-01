@@ -44,6 +44,9 @@ func (h *RequestHandler) handleFetch(req *Request) *Response {
 
 	var results []fetchTopic
 
+	// Get cluster router (nil in standalone mode)
+	cluster := h.broker.GetCluster()
+
 	for i := int32(0); i < topicCount; i++ {
 		topic, _ := req.Reader.ReadString()
 		partCount, _ := req.Reader.ReadArrayLen()
@@ -67,19 +70,35 @@ func (h *RequestHandler) handleFetch(req *Request) *Response {
 				maxBytes:  partMaxBytes,
 			}
 
-			// Fetch from storage
-			batches, err := h.broker.Fetch(topic, partition, offset, int64(partMaxBytes))
-			if err != nil {
-				if err == storage.ErrOffsetOutOfRange {
-					fp.errorCode = protocol.ErrOffsetOutOfRange
-				} else if err == storage.ErrTopicNotFound || err == storage.ErrPartitionNotFound {
-					fp.errorCode = protocol.ErrUnknownTopicOrPartition
+			// In cluster mode, if this node is not the leader, forward or error
+			if cluster != nil && !cluster.IsPartitionLocal(topic, partition) {
+				leaderID, _, _, ok := cluster.GetPartitionLeader(topic, partition)
+				if !ok {
+					fp.errorCode = protocol.ErrNotLeaderForPartition
 				} else {
-					fp.errorCode = protocol.ErrUnknown
+					remoteBatches, fwdErr := cluster.ForwardFetch(leaderID, topic, partition, offset, int64(partMaxBytes))
+					if fwdErr != nil {
+						fp.errorCode = protocol.ErrNotLeaderForPartition
+					} else {
+						fp.batches = remoteBatches
+						fp.errorCode = protocol.ErrNone
+					}
 				}
 			} else {
-				fp.batches = batches
-				fp.errorCode = protocol.ErrNone
+				// Local fetch
+				batches, err := h.broker.Fetch(topic, partition, offset, int64(partMaxBytes))
+				if err != nil {
+					if err == storage.ErrOffsetOutOfRange {
+						fp.errorCode = protocol.ErrOffsetOutOfRange
+					} else if err == storage.ErrTopicNotFound || err == storage.ErrPartitionNotFound {
+						fp.errorCode = protocol.ErrUnknownTopicOrPartition
+					} else {
+						fp.errorCode = protocol.ErrUnknown
+					}
+				} else {
+					fp.batches = batches
+					fp.errorCode = protocol.ErrNone
+				}
 			}
 
 			ft.partitions = append(ft.partitions, fp)

@@ -5,6 +5,7 @@ A high-performance, Kafka protocol-compatible event streaming platform implement
 ## Features
 
 - **Kafka Protocol Compatible** - Works with existing Kafka clients (librdkafka, kafka-go, Sarama, etc.)
+- **HTTP/HTTPS Gateway** - Optional REST API for producing messages, managing topics, and health checks — no Kafka client needed
 - **Persistent Storage** - Durable append-only log segments with configurable retention
 - **Pluggable Storage Backends** - File (default), S3/MinIO, Redis Streams, Infinispan
 - **Topic Partitioning** - Horizontal scaling through configurable partitions
@@ -21,6 +22,7 @@ Detailed architecture and design documents are available in the [docs/](docs/) f
 |----------|-------------|
 | [Architecture Overview](docs/architecture-overview.md) | High-level system design and component interactions |
 | [Kafka Protocol](docs/protocol.md) | Wire protocol implementation and supported API versions |
+| [HTTP Gateway](docs/http-gateway.md) | REST API for producing, topic admin, and health checks |
 | [Consumer Groups](docs/consumer-groups.md) | Group coordinator, rebalance protocol, and state machine |
 | [Storage Backends](docs/storage-backends.md) | StorageEngine interface and backend implementations |
 | [Configuration](docs/configuration.md) | Complete configuration reference |
@@ -37,8 +39,10 @@ Detailed architecture and design documents are available in the [docs/](docs/) f
 │  │  Server   │──▶│   Handler    │──▶│   Coordinator          │  │
 │  │           │   │   (dispatch) │   │   (state machine)      │  │
 │  └───────────┘   └──────┬───────┘   └────────────────────────┘  │
-│       │                 │                                        │
-│       │   ┌─────────────▼──────────────────────────────┐        │
+│       │                 │                                        ││  ┌───────────┐                                                   │
+│  │  HTTP     │   REST API: POST /topics/{topic}                  │
+│  │  Gateway  │─────┬───────────── Admin: PUT/DELETE/PATCH/PURGE   │
+│  └───────────┘     │                                        ││       │   ┌─────────────▼──────────────────────────────┐        │
 │       │   │            Broker Core                      │        │
 │       │   │  ┌──────────┐ ┌──────────┐ ┌──────────┐    │        │
 │       │   │  │ Topic A  │ │ Topic B  │ │ Topic C  │ …  │        │
@@ -55,6 +59,12 @@ Detailed architecture and design documents are available in the [docs/](docs/) f
 │  │  └────────┘  └────────┘  └────────┘  └────────────┘  │       │
 │  └──────────────────────────────────────────────────────┘       │
 └─────────────────────────────────────────────────────────────────┘
+
+              ┌─────── Cluster Layer (optional) ───────┐
+              │  Gossip (UDP)  │  RPC (TCP)  │ Ctrl    │
+              │  SWIM-lite     │  Replicate  │ Elect   │
+              │  membership    │  Forward    │ Assign  │
+              └────────────────┴─────────────┴─────────┘
 ```
 
 ## Quick Start
@@ -86,7 +96,24 @@ make build
 ./horizon -config configs/config.yaml
 
 # Run with Docker
-docker run -d -p 9092:9092 -v horizon-data:/data --name horizon horizon:latest
+docker run -d -p 9092:9092 -p 8080:8080 -p 9093:9093 -v horizon-data:/data --name horizon horizon:latest
+```
+
+### Produce via HTTP (no Kafka client needed)
+
+```bash
+# Simple JSON message
+curl -X POST "http://localhost:8080/topics/orders?type=json&key=order-1" \
+  -d '{"orderId": 1, "amount": 99.90}'
+
+# Create a topic with 10 partitions
+curl -X PUT "http://localhost:8080/admin/topics/events?partitions=10"
+
+# Delete a topic
+curl -X DELETE "http://localhost:8080/admin/topics/old-events"
+
+# Purge topic data (keep topic config)
+curl -X POST "http://localhost:8080/admin/topics/events/purge"
 ```
 
 ### Test with any Kafka client
@@ -144,6 +171,21 @@ broker:
   host: "0.0.0.0"
   port: 9092
 
+http:
+  enabled: true              # enable HTTP/HTTPS gateway
+  host: "0.0.0.0"
+  port: 8080
+  # tls_cert_file: "/path/to/cert.pem"
+  # tls_key_file:  "/path/to/key.pem"
+
+# Cluster mode (optional)
+cluster:
+  enabled: false             # set to true for multi-node
+  rpc_port: 9093
+  seeds: []                  # e.g. ["node2:9093", "node3:9093"]
+  gossip_interval_ms: 1000
+  failure_threshold_ms: 5000
+
 storage:
   backend: "file"          # "file" | "s3" | "redis" | "infinispan"
   data_dir: "./data"
@@ -183,6 +225,56 @@ Horizon implements the full Kafka consumer group protocol:
 
 See [docs/consumer-groups.md](docs/consumer-groups.md) for the complete design.
 
+## Cluster Mode
+
+Horizon supports **multi-node clustering** for horizontal scalability and high availability. When `cluster.enabled: true`, each broker participates in:
+
+- **Gossip membership** (UDP SWIM-lite) – automatic peer discovery and failure detection
+- **Controller election** – deterministic (lowest alive node ID), handles partition assignment
+- **Partition assignment** – round-robin across alive nodes with configurable replication factor
+- **Data replication** – followers continuously fetch from leaders via TCP RPC
+- **Request routing** – produce/fetch requests are transparently forwarded to the correct leader
+
+### 3-Node Cluster with Docker Compose
+
+```yaml
+# deployments/docker-compose-cluster.yml
+services:
+  horizon-1:
+    image: horizon:latest
+    ports: ["9092:9092", "8080:8080"]
+    environment:
+      - HORIZON_BROKER_ID=1
+    volumes:
+      - ./configs/cluster-node1.yaml:/app/config.yaml
+      - horizon-data-1:/data
+
+  horizon-2:
+    image: horizon:latest
+    ports: ["9192:9092", "8180:8080"]
+    environment:
+      - HORIZON_BROKER_ID=2
+    volumes:
+      - ./configs/cluster-node2.yaml:/app/config.yaml
+      - horizon-data-2:/data
+
+  horizon-3:
+    image: horizon:latest
+    ports: ["9292:9092", "8280:8080"]
+    environment:
+      - HORIZON_BROKER_ID=3
+    volumes:
+      - ./configs/cluster-node3.yaml:/app/config.yaml
+      - horizon-data-3:/data
+
+volumes:
+  horizon-data-1:
+  horizon-data-2:
+  horizon-data-3:
+```
+
+See [docs/cluster.md](docs/cluster.md) for the full cluster architecture, deployment guide, and failure scenarios.
+
 ## Project Structure
 
 ```
@@ -190,14 +282,24 @@ horizon/
 ├── cmd/horizon/              # Application entry point
 ├── internal/
 │   ├── broker/               # Broker logic, topic management, consumer groups
+│   ├── cluster/              # Cluster mode (gossip, RPC, controller, replicator)
+│   │   ├── cluster.go        # Main orchestrator, ClusterRouter implementation
+│   │   ├── state.go          # ClusterState, NodeInfo, PartitionAssignment
+│   │   ├── gossip.go         # UDP SWIM-lite membership protocol
+│   │   ├── rpc.go            # TCP inter-broker RPC (forward, replicate)
+│   │   ├── controller.go     # Controller election, partition assignment
+│   │   └── replicator.go     # Follower fetch loops, ISR tracking
 │   ├── config/               # YAML configuration loading
 │   ├── protocol/             # Kafka wire protocol (reader/writer/types)
-│   ├── server/               # TCP server, connection handling, request dispatch
+│   ├── server/               # TCP server, HTTP gateway, request dispatch
+│   │   ├── http.go           # HTTP/HTTPS gateway (produce, admin, metadata)
+│   │   ├── server.go         # TCP (Kafka protocol) server
+│   │   └── handler*.go       # Kafka protocol request handlers
 │   └── storage/              # Storage engine interface & file backend
 │       ├── s3/               # S3 / MinIO backend
 │       ├── redis/            # Redis Streams backend
 │       └── infinispan/       # Infinispan REST API backend
-├── build/Dockerfile          # Multi-stage Docker build
+├── build/Dockerfile          # Multi-stage Docker build (ports 9092, 8080, 9093)
 ├── configs/config.yaml       # Default configuration
 ├── deployments/              # Docker Compose files
 ├── docs/                     # Architecture & design documents

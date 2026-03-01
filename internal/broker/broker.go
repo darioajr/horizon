@@ -4,7 +4,9 @@ package broker
 
 import (
 	"fmt"
+	"hash/crc32"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"horizon/internal/storage"
@@ -62,6 +64,32 @@ func DefaultBrokerConfig() BrokerConfig {
 	}
 }
 
+// ClusterRouter is an optional interface implemented by the cluster layer.
+// When set on the broker, produce/fetch and metadata operations become
+// cluster-aware (checking partition leadership, forwarding to remote nodes,
+// returning all brokers in metadata responses, etc.).
+//
+// The interface lives in the broker package so the broker can use it without
+// importing the cluster package (avoiding circular imports).
+type ClusterRouter interface {
+	// Partition routing
+	IsPartitionLocal(topic string, partition int32) bool
+	GetPartitionLeader(topic string, partition int32) (nodeID int32, host string, port int32, ok bool)
+
+	// Forwarding
+	ForwardProduce(nodeID int32, topic string, partition int32, data []byte, recordCount int32, maxTs int64) (int64, error)
+	ForwardFetch(nodeID int32, topic string, partition int32, offset int64, maxBytes int64) ([]*storage.RecordBatch, error)
+
+	// Cluster-wide metadata
+	GetClusterBrokers() []BrokerInfo
+	GetControllerID() int32
+	GetPartitionAssignment(topic string, partition int32) (replicas []int32, isr []int32, leaderEpoch int32)
+
+	// Notifications
+	NotifyTopicCreated(topic string, numPartitions int32, replicationFactor int16)
+	NotifyTopicDeleted(topic string)
+}
+
 // Broker is the main message broker
 type Broker struct {
 	mu sync.RWMutex
@@ -77,8 +105,14 @@ type Broker struct {
 	// Consumer group manager
 	groupManager *GroupManager
 
+	// Optional cluster router (nil in standalone mode)
+	cluster ClusterRouter
+
 	// Cluster metadata version
 	metadataVersion int32
+
+	// Round-robin counter for keyless partition assignment
+	rrCounter atomic.Int64
 
 	// Whether broker is running
 	running bool
@@ -228,6 +262,72 @@ func (b *Broker) Produce(topic string, partition int32, records []storage.Record
 	return b.log.Append(topic, partition, records)
 }
 
+// ProduceAutoPartition writes records to a topic, choosing the partition
+// automatically. When a non-nil key is provided the partition is determined
+// by hash(key) % numPartitions (consistent hashing). When key is nil a
+// simple round-robin is used.
+//
+// The number of partitions is resolved in order:
+//  1. topicConfigs (in-memory topic registry)
+//  2. storage engine metadata (covers topics that exist on disk/backend)
+//  3. DefaultNumPartitions (only when auto-creating a brand new topic)
+func (b *Broker) ProduceAutoPartition(topic string, key []byte, records []storage.Record) (partition int32, baseOffset int64, err error) {
+	b.mu.RLock()
+	if !b.running {
+		b.mu.RUnlock()
+		return 0, 0, fmt.Errorf("broker not running")
+	}
+	autoCreate := b.config.AutoCreateTopics
+	numPartitions := int32(0)
+	if tc := b.topicConfigs[topic]; tc != nil {
+		numPartitions = tc.NumPartitions
+	}
+	b.mu.RUnlock()
+
+	// Auto-create topic if it doesn't exist yet
+	if autoCreate {
+		if err := b.ensureTopic(topic); err != nil {
+			return 0, 0, err
+		}
+		// Re-read after potential creation
+		b.mu.RLock()
+		if tc := b.topicConfigs[topic]; tc != nil {
+			numPartitions = tc.NumPartitions
+		}
+		b.mu.RUnlock()
+	}
+
+	// Fallback: query the storage engine for the real partition count.
+	// This covers topics that were created externally or existed before
+	// the broker started and weren't yet loaded into topicConfigs.
+	if numPartitions <= 0 {
+		if meta, mErr := b.log.GetTopicMetadata(topic); mErr == nil && len(meta.Partitions) > 0 {
+			numPartitions = int32(len(meta.Partitions))
+		}
+	}
+
+	// Ultimate fallback
+	if numPartitions <= 0 {
+		numPartitions = b.config.DefaultNumPartitions
+	}
+	if numPartitions <= 0 {
+		numPartitions = 1
+	}
+
+	if key != nil && len(key) > 0 {
+		// Consistent hash: crc32 of the key mod numPartitions
+		h := crc32.ChecksumIEEE(key)
+		partition = int32(h % uint32(numPartitions))
+	} else {
+		// Round-robin
+		n := b.rrCounter.Add(1)
+		partition = int32(n % int64(numPartitions))
+	}
+
+	baseOffset, err = b.log.Append(topic, partition, records)
+	return partition, baseOffset, err
+}
+
 // Fetch reads records from a topic partition
 func (b *Broker) Fetch(topic string, partition int32, offset int64, maxBytes int64) ([]*storage.RecordBatch, error) {
 	b.mu.RLock()
@@ -270,6 +370,11 @@ func (b *Broker) CreateTopic(name string, numPartitions int32, replicationFactor
 
 	b.metadataVersion++
 
+	// Notify cluster so the controller can compute partition assignments
+	if b.cluster != nil {
+		go b.cluster.NotifyTopicCreated(name, numPartitions, replicationFactor)
+	}
+
 	return nil
 }
 
@@ -289,6 +394,67 @@ func (b *Broker) DeleteTopic(name string) error {
 	delete(b.topicConfigs, name)
 	b.metadataVersion++
 
+	// Notify cluster
+	if b.cluster != nil {
+		go b.cluster.NotifyTopicDeleted(name)
+	}
+
+	return nil
+}
+
+// PurgeTopic deletes all data in a topic but preserves the topic and its
+// configuration. It does this by deleting and re-creating the topic in the
+// storage layer with the same number of partitions.
+func (b *Broker) PurgeTopic(name string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if !b.running {
+		return fmt.Errorf("broker not running")
+	}
+
+	tc, exists := b.topicConfigs[name]
+	if !exists {
+		return storage.ErrTopicNotFound
+	}
+
+	// Delete from storage
+	if err := b.log.DeleteTopic(name); err != nil {
+		return fmt.Errorf("purge: failed to delete topic data: %w", err)
+	}
+
+	// Re-create with the same partition count
+	if err := b.log.CreateTopic(name, tc.NumPartitions); err != nil {
+		return fmt.Errorf("purge: failed to re-create topic: %w", err)
+	}
+
+	b.metadataVersion++
+	return nil
+}
+
+// UpdateTopicConfig updates mutable fields of a topic's configuration.
+// Only non-zero values in the provided struct are applied.
+func (b *Broker) UpdateTopicConfig(name string, retentionMs *int64, cleanupPolicy *string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if !b.running {
+		return fmt.Errorf("broker not running")
+	}
+
+	tc, exists := b.topicConfigs[name]
+	if !exists {
+		return storage.ErrTopicNotFound
+	}
+
+	if retentionMs != nil {
+		tc.RetentionMs = *retentionMs
+	}
+	if cleanupPolicy != nil && (*cleanupPolicy == "delete" || *cleanupPolicy == "compact") {
+		tc.CleanupPolicy = *cleanupPolicy
+	}
+
+	b.metadataVersion++
 	return nil
 }
 
@@ -333,7 +499,28 @@ func (b *Broker) ensureTopic(topic string) error {
 	return nil
 }
 
-// GetMetadata returns cluster metadata
+// ListTopics returns all registered TopicConfig entries.
+func (b *Broker) ListTopics() []*TopicConfig {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	out := make([]*TopicConfig, 0, len(b.topicConfigs))
+	for _, tc := range b.topicConfigs {
+		out = append(out, tc)
+	}
+	return out
+}
+
+// GetTopicConfig returns the configuration for a single topic, or nil.
+func (b *Broker) GetTopicConfig(name string) *TopicConfig {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.topicConfigs[name]
+}
+
+// GetMetadata returns cluster metadata.
+// In cluster mode this returns all brokers and accurate partition leadership.
+// In standalone mode it returns only this broker as leader of everything.
 func (b *Broker) GetMetadata(topics []string) (*ClusterMetadata, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -352,13 +539,23 @@ func (b *Broker) GetMetadata(topics []string) (*ClusterMetadata, error) {
 		}
 	}
 
-	meta := &ClusterMetadata{
-		Brokers: []BrokerInfo{{
-			NodeID: b.config.NodeID,
-			Host:   advertisedHost,
-			Port:   b.config.Port,
-		}},
-		ControllerID: b.config.NodeID,
+	// Cluster mode: return all brokers from the cluster router
+	var meta *ClusterMetadata
+	if b.cluster != nil {
+		meta = &ClusterMetadata{
+			Brokers:      b.cluster.GetClusterBrokers(),
+			ControllerID: b.cluster.GetControllerID(),
+		}
+	} else {
+		// Standalone mode: only this broker
+		meta = &ClusterMetadata{
+			Brokers: []BrokerInfo{{
+				NodeID: b.config.NodeID,
+				Host:   advertisedHost,
+				Port:   b.config.Port,
+			}},
+			ControllerID: b.config.NodeID,
+		}
 	}
 
 	// If no topics specified, return all
@@ -377,13 +574,27 @@ func (b *Broker) GetMetadata(topics []string) (*ClusterMetadata, error) {
 		}
 
 		for _, pm := range topicMeta.Partitions {
-			tm.Partitions = append(tm.Partitions, PartitionMetadata{
+			pmeta := PartitionMetadata{
 				Partition:     pm.Partition,
-				Leader:        b.config.NodeID,
-				Replicas:      []int32{b.config.NodeID},
-				ISR:           []int32{b.config.NodeID},
 				HighWatermark: pm.HighWatermark,
-			})
+			}
+			if b.cluster != nil {
+				replicas, isr, leaderEpoch := b.cluster.GetPartitionAssignment(topic, pm.Partition)
+				leaderID, _, _, ok := b.cluster.GetPartitionLeader(topic, pm.Partition)
+				if ok {
+					pmeta.Leader = leaderID
+				} else {
+					pmeta.Leader = -1
+				}
+				pmeta.Replicas = replicas
+				pmeta.ISR = isr
+				pmeta.LeaderEpoch = leaderEpoch
+			} else {
+				pmeta.Leader = b.config.NodeID
+				pmeta.Replicas = []int32{b.config.NodeID}
+				pmeta.ISR = []int32{b.config.NodeID}
+			}
+			tm.Partitions = append(tm.Partitions, pmeta)
 		}
 
 		meta.Topics = append(meta.Topics, tm)
@@ -407,6 +618,26 @@ func (b *Broker) ListOffsets(topic string, partition int32, timestamp int64) (in
 	}
 
 	return p.GetOffsetByTime(timestamp)
+}
+
+// SetCluster wires an optional cluster router into the broker.
+// When set, metadata and produce/fetch become cluster-aware.
+func (b *Broker) SetCluster(c ClusterRouter) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.cluster = c
+}
+
+// GetCluster returns the cluster router (nil in standalone mode).
+func (b *Broker) GetCluster() ClusterRouter {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.cluster
+}
+
+// GetPartition returns a read-only handle to a partition.
+func (b *Broker) GetPartition(topic string, partition int32) (storage.PartitionReader, error) {
+	return b.log.GetPartition(topic, partition)
 }
 
 // GetGroupManager returns the consumer group manager
@@ -438,6 +669,7 @@ type TopicMetadata struct {
 type PartitionMetadata struct {
 	Partition     int32
 	Leader        int32
+	LeaderEpoch   int32
 	Replicas      []int32
 	ISR           []int32
 	HighWatermark int64

@@ -35,8 +35,8 @@ RUN mkdir -p /data
 # Copy default config
 COPY configs/config.yaml /app/config.yaml
 
-# Expose Kafka port
-EXPOSE 9092
+# Expose Kafka port, HTTP gateway port, and inter-broker RPC/gossip port
+EXPOSE 9092 8080 9093
 
 # Volume for data persistence
 VOLUME ["/data"]
