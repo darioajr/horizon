@@ -10,7 +10,7 @@ All notable changes to Horizon will be documented in this file.\n
 
 body = """
 {%- macro remote_url() -%}
-  https://github.com/{{ remote.github.darioajr }}/{{ remote.github.repo }}
+  https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}
 {%- endmacro -%}
 
 {% if version -%}
@@ -38,13 +38,6 @@ body = """
 {%- endif -%}
 {%- endfor %}
 {% endfor %}
-
-{%- if github.contributors | filter(attribute="is_first_time", value=true) | length != 0 %}
-### New Contributors
-{%- for contributor in github.contributors | filter(attribute="is_first_time", value=true) %}
-* @{{ contributor.username }} made their first contribution
-{%- endfor %}
-{%- endif -%}
 
 """
 
@@ -90,5 +83,5 @@ tag_pattern = "v[0-9].*"
 sort_commits = "oldest"
 
 [remote.github]
-owner = ""
+owner = "darioajr"
 repo = "horizon"
