@@ -348,4 +348,4 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 
 Apache License 2.0 - See [LICENSE](LICENSE) for details.
 
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fdarioajr%2Fjava-fix-to-avro.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fdarioajr%2Fjava-fix-to-avro?ref=badge_large)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fdarioajr%2Fhorizon.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fdarioajr%2Fhorizon?ref=badge_large)
