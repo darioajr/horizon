@@ -73,6 +73,27 @@ func main() {
 		cfg.Broker.ID = *brokerID
 	}
 
+	// Apply environment variable overrides (highest priority after CLI flags)
+	if v := os.Getenv("HORIZON_BROKER_ID"); v != "" && *brokerID == 0 {
+		if id, err := fmt.Sscanf(v, "%d", &cfg.Broker.ID); id != 1 {
+			log.Printf("Warning: invalid HORIZON_BROKER_ID=%q: %v", v, err)
+		}
+	}
+	if v := os.Getenv("HORIZON_HOST"); v != "" && *host == "0.0.0.0" {
+		cfg.Broker.Host = v
+	}
+	if v := os.Getenv("HORIZON_PORT"); v != "" && *port == 9092 {
+		if _, err := fmt.Sscanf(v, "%d", &cfg.Broker.Port); err != nil {
+			log.Printf("Warning: invalid HORIZON_PORT=%q: %v", v, err)
+		}
+	}
+	if v := os.Getenv("HORIZON_ADVERTISED_HOST"); v != "" && *advertisedHost == "" {
+		cfg.Broker.AdvertisedHost = v
+	}
+	if v := os.Getenv("HORIZON_DATA_DIR"); v != "" && *dataDir == "./data" {
+		cfg.Storage.DataDir = v
+	}
+
 	// Determine effective advertised host for logging
 	effectiveAdvertisedHost := cfg.Broker.AdvertisedHost
 	if effectiveAdvertisedHost == "" {

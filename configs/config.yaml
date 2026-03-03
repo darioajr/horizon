@@ -5,6 +5,10 @@ broker:
   host: "0.0.0.0"
   port: 9092
   cluster_id: "horizon-cluster"
+  # advertised_host: ""       # hostname/IP advertised to clients in metadata
+                               # defaults to "localhost" when host is 0.0.0.0
+                               # set to container name when using Docker networks
+                               # can also be set via HORIZON_ADVERTISED_HOST env var
 
 # Cluster mode – enables multi-node operation with partition assignment,
 # replication, and automatic failover.

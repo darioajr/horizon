@@ -1,14 +1,15 @@
 # Configuration Reference
 
-Horizon is configured via a YAML file (default: `configs/config.yaml`) and/or command-line flags. This document lists every option.
+Horizon is configured via a YAML file (default: `configs/config.yaml`), environment variables, and/or command-line flags. This document lists every option.
 
 ## Configuration File
 
-### Loading Order
+### Loading Order (lowest → highest priority)
 
 1. Built-in defaults (see `config.Default()`)
 2. YAML file (if `-config` flag is provided)
-3. Command-line flag overrides
+3. Environment variables (`HORIZON_*`)
+4. Command-line flag overrides
 
 ### Full Example
 
@@ -211,13 +212,33 @@ Flags override the corresponding YAML values:
 
 ## Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `HORIZON_BROKER_ID` | Broker node ID | `1` |
-| `HORIZON_HOST` | Bind address | `0.0.0.0` |
-| `HORIZON_PORT` | Broker port | `9092` |
+Environment variables override YAML values and are overridden by CLI flags.
+They are particularly useful in container environments.
 
-> **Note:** Environment variable support is planned. Currently, use flags or the YAML file.
+| Variable | YAML Equivalent | Default | Description |
+|----------|-----------------|---------|-------------|
+| `HORIZON_BROKER_ID` | `broker.id` | `1` | Broker node ID |
+| `HORIZON_HOST` | `broker.host` | `0.0.0.0` | Bind address |
+| `HORIZON_PORT` | `broker.port` | `9092` | Broker port |
+| `HORIZON_ADVERTISED_HOST` | `broker.advertised_host` | `"localhost"` | **Host reported to clients in metadata.** Set to container name when using Docker networks |
+| `HORIZON_DATA_DIR` | `storage.data_dir` | `./data` | Data directory path |
+
+> **Why `HORIZON_ADVERTISED_HOST` matters:** When a Kafka client connects, it uses the bootstrap address only for the initial handshake. All subsequent connections use the *advertised* address from the metadata response. If the advertised host is `localhost`, clients in other containers cannot reach the broker. Set it to the container name or external hostname.
+
+### Examples
+
+```bash
+# Docker with custom network (container-to-container)
+docker run -d --name horizon --network my-net \
+  -e HORIZON_ADVERTISED_HOST=horizon \
+  darioajr/horizon
+
+# External access from other machines
+docker run -d --name horizon \
+  -p 9092:9092 \
+  -e HORIZON_ADVERTISED_HOST=192.168.1.100 \
+  darioajr/horizon
+```
 
 ---
 
@@ -230,10 +251,11 @@ docker run -d \
   -p 9092:9092 \
   -p 8080:8080 \
   -p 9093:9093 \
+  -e HORIZON_ADVERTISED_HOST=horizon \
   -v ./my-config.yaml:/app/config.yaml \
   -v horizon-data:/data \
   --name horizon \
-  horizon:latest
+  darioajr/horizon
 ```
 
 Or use Docker Compose:
@@ -241,17 +263,23 @@ Or use Docker Compose:
 ```yaml
 services:
   horizon:
-    image: horizon:latest
+    image: darioajr/horizon
     ports:
       - "9092:9092"
       - "8080:8080"
       - "9093:9093"
+    environment:
+      HORIZON_ADVERTISED_HOST: horizon
+      HORIZON_BROKER_ID: "1"
     volumes:
       - ./configs/config.yaml:/app/config.yaml
       - horizon-data:/data
-    environment:
-      - HORIZON_BROKER_ID=1
+    networks:
+      - app-net
 
 volumes:
   horizon-data:
+
+networks:
+  app-net:
 ```

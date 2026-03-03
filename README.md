@@ -37,6 +37,7 @@ Detailed architecture and design documents are available in the [docs/](docs/) f
 | [Consumer Groups](docs/consumer-groups.md) | Group coordinator, rebalance protocol, and state machine |
 | [Storage Backends](docs/storage-backends.md) | StorageEngine interface and backend implementations |
 | [Configuration](docs/configuration.md) | Complete configuration reference |
+| [Testing: Horizon vs Kafka](docs/testing-horizon-vs-kafka.md) | Side-by-side benchmark with Kafka KRaft using Docker |
 
 ## Architecture
 
@@ -219,6 +220,40 @@ docker run -d \
     --port 9092 \
     --host 0.0.0.0 \
     --broker-id 1
+```
+
+### Environment Variables
+
+Environment variables provide the easiest way to configure Horizon in containers. They take
+precedence over config file values but are overridden by CLI flags:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HORIZON_ADVERTISED_HOST` | `localhost` | Hostname/IP advertised to clients in metadata responses. **Required** when running in Docker with custom networks |
+| `HORIZON_HOST` | `0.0.0.0` | Listen address |
+| `HORIZON_PORT` | `9092` | Listen port |
+| `HORIZON_BROKER_ID` | `1` | Broker ID |
+| `HORIZON_DATA_DIR` | `./data` | Data directory path |
+
+Example — Docker Compose on a custom network:
+
+```yaml
+services:
+  horizon:
+    image: darioajr/horizon
+    environment:
+      HORIZON_ADVERTISED_HOST: horizon   # container name
+    networks:
+      - app-net
+```
+
+Example — standalone Docker with host networking:
+
+```bash
+docker run -d --name horizon \
+  -p 9092:9092 \
+  -e HORIZON_ADVERTISED_HOST=my-server.example.com \
+  darioajr/horizon
 ```
 
 ### Storage Backends via Docker
