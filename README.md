@@ -9,8 +9,7 @@
 [![Docker Image Size](https://img.shields.io/docker/image-size/darioajr/horizon?sort=semver&logo=docker)](https://hub.docker.com/r/darioajr/horizon)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/darioajr/horizon?logo=go)](go.mod)
 [![License](https://img.shields.io/github/license/darioajr/horizon)](LICENSE)
-
-> **Note:** Replace `OWNER` in the badge URLs above with your GitHub username or organization name.
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fdarioajr%2Fhorizon.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fdarioajr%2Fhorizon?ref=badge_shield) 
 
 A high-performance, Kafka protocol-compatible event streaming platform implemented in Go. Inspired by WarpStream and EventHorizon.
 
@@ -341,10 +340,12 @@ BenchmarkPartitionWrite-8  1000000   1102 ns/op    3.6 GB/s
 | `make build` | Build (Linux/macOS) |
 | `make docker` | Docker image (Linux/macOS) |
 
+## Contributing
+
+Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) first.
+
 ## License
 
 Apache License 2.0 - See [LICENSE](LICENSE) for details.
 
-## Contributing
-
-Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) first.
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fdarioajr%2Fjava-fix-to-avro.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fdarioajr%2Fjava-fix-to-avro?ref=badge_large)
