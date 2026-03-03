@@ -149,6 +149,350 @@ msg, _ := reader.ReadMessage(context.Background())
 fmt.Println(string(msg.Value))
 ```
 
+## Docker
+
+### Quick Run
+
+```bash
+docker pull darioajr/horizon
+docker run -d \
+  --name horizon \
+  -p 9092:9092 \
+  -p 8080:8080 \
+  -v horizon-data:/data \
+  darioajr/horizon
+```
+
+Horizon is now available on `localhost:9092` (Kafka protocol) and `localhost:8080` (HTTP gateway).
+
+### Supported Platforms
+
+| Platform | Architecture | Tag Example |
+|----------|-------------|-------------|
+| Linux    | amd64       | `darioajr/horizon:latest` |
+| Linux    | arm64       | `darioajr/horizon:latest` |
+
+Docker automatically pulls the correct image for your architecture.
+
+### Ports
+
+| Port | Protocol | Description |
+|------|----------|-------------|
+| 9092 | TCP      | Kafka binary protocol (clients) |
+| 8080 | TCP      | HTTP/HTTPS gateway (REST API) |
+| 9093 | TCP/UDP  | Inter-broker RPC & gossip (cluster mode) |
+
+### Volumes
+
+| Path | Description |
+|------|-------------|
+| `/data` | Persistent storage for log segments and topic data |
+| `/app/config.yaml` | Configuration file (mount to override defaults) |
+
+### Custom Configuration
+
+Mount your own `config.yaml` to override any default:
+
+```bash
+docker run -d \
+  --name horizon \
+  -p 9092:9092 \
+  -p 8080:8080 \
+  -v horizon-data:/data \
+  -v ./my-config.yaml:/app/config.yaml \
+  darioajr/horizon
+```
+
+### Command-Line Overrides
+
+The entrypoint accepts CLI flags that override config file values:
+
+```bash
+docker run -d \
+  --name horizon \
+  -p 9092:9092 \
+  -p 8080:8080 \
+  -v horizon-data:/data \
+  darioajr/horizon \
+    --config /app/config.yaml \
+    --data-dir /data \
+    --port 9092 \
+    --host 0.0.0.0 \
+    --broker-id 1
+```
+
+### Storage Backends via Docker
+
+#### File (default — no extra config needed)
+
+```bash
+docker run -d --name horizon \
+  -p 9092:9092 -v horizon-data:/data \
+  darioajr/horizon
+```
+
+#### S3 / MinIO
+
+```yaml
+# s3-config.yaml
+broker:
+  id: 1
+  host: "0.0.0.0"
+  port: 9092
+storage:
+  backend: "s3"
+  s3:
+    bucket: "horizon-data"
+    region: "us-east-1"
+    endpoint: "http://minio:9000"   # omit for AWS S3
+    access_key: "minioadmin"
+    secret_key: "minioadmin"
+```
+
+```bash
+docker run -d --name horizon \
+  -p 9092:9092 \
+  -v ./s3-config.yaml:/app/config.yaml \
+  darioajr/horizon
+```
+
+#### Redis Streams
+
+```yaml
+# redis-config.yaml
+broker:
+  id: 1
+  host: "0.0.0.0"
+  port: 9092
+storage:
+  backend: "redis"
+  redis:
+    addr: "redis:6379"
+    password: ""
+    db: 0
+    key_prefix: "horizon"
+```
+
+```bash
+docker run -d --name horizon \
+  -p 9092:9092 \
+  -v ./redis-config.yaml:/app/config.yaml \
+  --link my-redis:redis \
+  darioajr/horizon
+```
+
+#### Infinispan
+
+```yaml
+# infinispan-config.yaml
+broker:
+  id: 1
+  host: "0.0.0.0"
+  port: 9092
+storage:
+  backend: "infinispan"
+  infinispan:
+    url: "http://infinispan:11222"
+    cache_name: "horizon"
+    username: "admin"
+    password: "secret"
+```
+
+```bash
+docker run -d --name horizon \
+  -p 9092:9092 \
+  -v ./infinispan-config.yaml:/app/config.yaml \
+  darioajr/horizon
+```
+
+### HTTP Gateway
+
+Enable the REST API for producing messages without a Kafka client:
+
+```yaml
+# http-config.yaml
+broker:
+  id: 1
+  host: "0.0.0.0"
+  port: 9092
+http:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+  # tls_cert_file: "/certs/cert.pem"
+  # tls_key_file:  "/certs/key.pem"
+```
+
+```bash
+docker run -d --name horizon \
+  -p 9092:9092 -p 8080:8080 \
+  -v ./http-config.yaml:/app/config.yaml \
+  darioajr/horizon
+
+# Test
+curl -X POST "http://localhost:8080/topics/test?type=json" \
+  -d '{"hello": "world"}'
+```
+
+### Performance Tuning
+
+```yaml
+# performance-config.yaml
+broker:
+  id: 1
+  host: "0.0.0.0"
+  port: 9092
+storage:
+  backend: "file"
+  data_dir: "/data"
+  segment_size_mb: 1024       # 1 GB per segment
+  retention_hours: 168         # 7 days
+  sync_writes: false           # true = fsync every write (slower, safer)
+  flush_interval: "1s"
+defaults:
+  num_partitions: 6            # more partitions = more parallelism
+  replication_factor: 1
+performance:
+  write_buffer_kb: 2048        # 2 MB write buffer
+  max_connections: 10000
+  io_threads: 4
+  read_buffer_size: 65536      # 64 KB per connection
+```
+
+### Docker Compose Examples
+
+#### Single Node
+
+```yaml
+version: "3.8"
+services:
+  horizon:
+    image: darioajr/horizon:latest
+    ports:
+      - "9092:9092"
+      - "8080:8080"
+    volumes:
+      - horizon-data:/data
+      - ./configs/config.yaml:/app/config.yaml
+    restart: unless-stopped
+
+volumes:
+  horizon-data:
+```
+
+#### 3-Node Cluster
+
+```yaml
+version: "3.8"
+services:
+  horizon-1:
+    image: darioajr/horizon:latest
+    ports: ["9092:9092", "8080:8080"]
+    volumes:
+      - ./configs/cluster-node1.yaml:/app/config.yaml
+      - horizon-data-1:/data
+
+  horizon-2:
+    image: darioajr/horizon:latest
+    ports: ["9192:9092", "8180:8080"]
+    volumes:
+      - ./configs/cluster-node2.yaml:/app/config.yaml
+      - horizon-data-2:/data
+
+  horizon-3:
+    image: darioajr/horizon:latest
+    ports: ["9292:9092", "8280:8080"]
+    volumes:
+      - ./configs/cluster-node3.yaml:/app/config.yaml
+      - horizon-data-3:/data
+
+volumes:
+  horizon-data-1:
+  horizon-data-2:
+  horizon-data-3:
+```
+
+#### With MinIO (S3 Backend)
+
+```yaml
+version: "3.8"
+services:
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    ports: ["9000:9000", "9001:9001"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+
+  horizon:
+    image: darioajr/horizon:latest
+    ports: ["9092:9092", "8080:8080"]
+    volumes:
+      - ./configs/s3-config.yaml:/app/config.yaml
+    depends_on: [minio]
+
+volumes:
+  minio-data:
+```
+
+#### With Redis
+
+```yaml
+version: "3.8"
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    volumes:
+      - redis-data:/data
+
+  horizon:
+    image: darioajr/horizon:latest
+    ports: ["9092:9092", "8080:8080"]
+    volumes:
+      - ./configs/redis-config.yaml:/app/config.yaml
+    depends_on: [redis]
+
+volumes:
+  redis-data:
+```
+
+### Health Check
+
+```bash
+# HTTP gateway health endpoint
+curl http://localhost:8080/health
+```
+
+Add to Docker Compose:
+
+```yaml
+services:
+  horizon:
+    image: darioajr/horizon:latest
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+```
+
+### Version Pinning
+
+```bash
+# Latest stable
+docker pull darioajr/horizon:latest
+
+# Specific version
+docker pull darioajr/horizon:0.1.0
+
+# Major.minor (auto-patches)
+docker pull darioajr/horizon:0.1
+```
+
 ## Supported Kafka APIs
 
 | API | Key | Versions | Status |
