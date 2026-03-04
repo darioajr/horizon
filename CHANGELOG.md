@@ -2,6 +2,29 @@
 
 All notable changes to Horizon will be documented in this file.
 
+## [0.1.2] - 2026-03-04
+
+### 📚 Documentation
+
+- Update CHANGELOG.md for v0.1.1
+([5bb4372](https://github.com/darioajr/horizon/commit/5bb4372bb0628b1b5d80a6ae4e4e2a576f8f8990))
+
+### 📝 Other
+
+- Remove unnecessary outputs from changelog job in release workflow
+([c8dc1bf](https://github.com/darioajr/horizon/commit/c8dc1bf1005b710fd65210b0d35907cc7579b7ba))
+- Merge branch 'main' of github.com:darioajr/horizon
+([b4dfe6a](https://github.com/darioajr/horizon/commit/b4dfe6af5d2d4afbe0f179d9a9ef09bb34f185fa))
+
+### 🚀 Features
+
+- Implement DescribeConfigs handler and update Kafka container version
+- Added handleDescribeConfigs function to process DescribeConfigs requests.
+    - Updated Kafka container version from 7.5.0 to 8.1.1 in benchmarks.
+    - Adjusted various API version handling and error messages for clarity.
+    - Enhanced Fetch request handling to return empty results when caught up.
+([cc2b4bd](https://github.com/darioajr/horizon/commit/cc2b4bdf3c58dcb09c8439ef1a806fecb96fa04f))
+
 ## [0.1.1] - 2026-03-03
 
 ### 📝 Other
