@@ -6,8 +6,9 @@ Testa throughput e latência de produção de mensagens
 Uso:
     python produce_benchmark.py --help
     python produce_benchmark.py --kafka-only
-    python produce_benchmark.py --horizon-only --eh-host localhost --eh-port 9092
-    python produce_benchmark.py --compare --eh-host localhost --eh-port 9092
+    python produce_benchmark.py --remote --host horizon-test --port 9092
+    python produce_benchmark.py --remote --host kafka-kraft-test --port 9092
+    python produce_benchmark.py --compare --host horizon-test --port 9092
 
 Baseado em: https://developer.confluent.io/learn/kafka-performance/
 """
@@ -28,7 +29,6 @@ from confluent_kafka.admin import AdminClient, NewTopic
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
-from testcontainers.kafka import KafkaContainer
 
 console = Console()
 
@@ -186,29 +186,33 @@ def run_produce_benchmark(
     # Callback para tracking
     delivery_times = []
     errors = [0]
+    send_times = []  # parallel list of send timestamps
+    delivery_idx = [0]  # index consumed by callback
     
     def delivery_callback(err, msg):
         if err:
             errors[0] += 1
         else:
-            # Latência = tempo atual - tempo de envio (armazenado no opaque)
-            send_time = msg.opaque()
-            if send_time:
-                latency_ms = (time.perf_counter() - send_time) * 1000
+            idx = delivery_idx[0]
+            if idx < len(send_times):
+                latency_ms = (time.perf_counter() - send_times[idx]) * 1000
                 delivery_times.append(latency_ms)
+            delivery_idx[0] += 1
     
     # Warmup
     console.print(f"\n[cyan]Warmup ({config.warmup_messages} mensagens)...[/cyan]")
     for _ in range(config.warmup_messages):
+        send_times.append(time.perf_counter())
         producer.produce(
             config.topic,
             value=payload,
             callback=delivery_callback,
-            opaque=time.perf_counter()
         )
         producer.poll(0)
     producer.flush()
     delivery_times.clear()
+    send_times.clear()
+    delivery_idx[0] = 0
     errors[0] = 0
     
     # Benchmark real
@@ -226,12 +230,11 @@ def run_produce_benchmark(
         task = progress.add_task(f"[green]Produzindo para {target_name}...", total=config.num_messages)
         
         for i in range(config.num_messages):
-            send_time = time.perf_counter()
+            send_times.append(time.perf_counter())
             producer.produce(
                 config.topic,
                 value=payload,
                 callback=delivery_callback,
-                opaque=send_time
             )
             
             # Poll para processar callbacks
@@ -391,21 +394,23 @@ def main():
         epilog="""
 Exemplos:
   python produce_benchmark.py --kafka-only
-  python produce_benchmark.py --horizon-only --eh-host localhost --eh-port 9092
-  python produce_benchmark.py --compare --eh-host localhost --eh-port 9092
+  python produce_benchmark.py --remote --host horizon-test --port 9092
+  python produce_benchmark.py --remote --host kafka-kraft-test --port 9092
+  python produce_benchmark.py --compare --host horizon-test --port 9092
   python produce_benchmark.py --compare --messages 1000000 --message-size 1024
         """
     )
     
     # Modo de execução
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--kafka-only", action="store_true", help="Testar apenas Kafka (via testcontainer)")
-    mode.add_argument("--horizon-only", action="store_true", help="Testar apenas Horizon")
-    mode.add_argument("--compare", action="store_true", help="Comparar Kafka e Horizon")
+    mode.add_argument("--kafka-only", action="store_true", help="Testar apenas Kafka (via testcontainer, requer Docker no host)")
+    mode.add_argument("--remote", action="store_true", help="Testar broker remoto (Horizon, Kafka, ou qualquer broker Kafka-compatível)")
+    mode.add_argument("--compare", action="store_true", help="Comparar Kafka (testcontainer) vs broker remoto")
     
-    # Horizon
-    parser.add_argument("--eh-host", default="localhost", help="Host do Horizon (default: localhost)")
-    parser.add_argument("--eh-port", type=int, default=9092, help="Porta do Horizon (default: 9092)")
+    # Broker remoto
+    parser.add_argument("--host", default="localhost", help="Host do broker remoto (default: localhost)")
+    parser.add_argument("--port", type=int, default=9092, help="Porta do broker remoto (default: 9092)")
+    parser.add_argument("--name", default=None, help="Nome do broker para exibição (default: auto-detect do host)")
     
     # Configuração do teste
     parser.add_argument("--messages", type=int, default=100_000, help="Número de mensagens (default: 100000)")
@@ -450,6 +455,7 @@ Exemplos:
     if args.kafka_only or args.compare:
         console.print("\n[bold cyan]━━━ Apache Kafka (Testcontainer) ━━━[/bold cyan]")
         
+        from testcontainers.kafka import KafkaContainer
         with KafkaContainer("confluentinc/cp-kafka:8.1.1") as kafka:
             bootstrap_servers = kafka.get_bootstrap_server()
             console.print(f"[green]✓[/green] Kafka iniciado: {bootstrap_servers}")
@@ -458,20 +464,28 @@ Exemplos:
             results.append(kafka_result)
             print_result(kafka_result)
     
-    # Testar Horizon
-    if args.horizon_only or args.compare:
-        console.print("\n[bold cyan]━━━ Horizon ━━━[/bold cyan]")
+    # Testar broker remoto
+    if args.remote or args.compare:
+        # Auto-detect display name from host if not specified
+        if args.name:
+            target_name = args.name
+        elif "horizon" in args.host.lower():
+            target_name = "Horizon"
+        elif "kafka" in args.host.lower():
+            target_name = "Apache Kafka"
+        else:
+            target_name = args.host
         
-        bootstrap_servers = f"{args.eh_host}:{args.eh_port}"
-        console.print(f"[dim]Conectando a: {bootstrap_servers}[/dim]")
+        bootstrap_servers = f"{args.host}:{args.port}"
+        console.print(f"\n[bold cyan]━━━ {target_name} ({bootstrap_servers}) ━━━[/bold cyan]")
         
         try:
-            horizon_result = run_produce_benchmark(bootstrap_servers, config, "Horizon")
+            horizon_result = run_produce_benchmark(bootstrap_servers, config, target_name)
             results.append(horizon_result)
             print_result(horizon_result)
         except Exception as e:
-            console.print(f"[red]✗[/red] Erro ao conectar ao Horizon: {e}")
-            console.print("[yellow]Certifique-se de que o Horizon está rodando.[/yellow]")
+            console.print(f"[red]✗[/red] Erro ao conectar a {target_name}: {e}")
+            console.print(f"[yellow]Certifique-se de que {target_name} está rodando em {bootstrap_servers}.[/yellow]")
             sys.exit(1)
     
     # Comparação

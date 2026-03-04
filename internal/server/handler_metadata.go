@@ -10,9 +10,6 @@ func (h *RequestHandler) handleApiVersions(req *Request) *Response {
 	resp := NewResponse(req.CorrelationID)
 	w := resp.Writer
 
-	// Error code
-	w.WriteInt16(int16(protocol.ErrNone))
-
 	// Supported API versions
 	// Note: Keeping max versions below flexible version threshold
 	// Flexible versions (v9+ for most APIs) use compact arrays/tagged fields
@@ -44,6 +41,15 @@ func (h *RequestHandler) handleApiVersions(req *Request) *Response {
 		{int16(protocol.ApiKeyDeleteGroups), 0, 1},        // v2+ uses flexible
 	}
 
+	// KIP-511: If the client requests a version we don't support (e.g. v3+
+	// which uses flexible encoding), respond with UNSUPPORTED_VERSION using
+	// the v0 response format so the client can fall back gracefully.
+	if req.ApiVersion > 2 {
+		w.WriteInt16(int16(protocol.ErrUnsupportedVersion))
+	} else {
+		w.WriteInt16(int16(protocol.ErrNone))
+	}
+
 	w.WriteArrayLen(int32(len(versions)))
 	for _, v := range versions {
 		w.WriteInt16(v.key)
@@ -51,8 +57,9 @@ func (h *RequestHandler) handleApiVersions(req *Request) *Response {
 		w.WriteInt16(v.maxVer)
 	}
 
-	// Throttle time (v1+)
-	if req.ApiVersion >= 1 {
+	// Throttle time (v1+ only for supported versions; omit for v3+ error path
+	// since we respond in v0 format)
+	if req.ApiVersion >= 1 && req.ApiVersion <= 2 {
 		w.WriteInt32(0)
 	}
 
