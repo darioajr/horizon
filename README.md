@@ -83,7 +83,7 @@ Detailed architecture and design documents are available in the [docs/](docs/) f
 
 ### Requirements
 
-- **Go 1.22+** (for local builds)
+- **Go 1.26+** (for local builds)
 - **Docker** and **Docker Compose** (optional, for containerized builds)
 - **Make** (Linux/macOS) or **PowerShell** (Windows)
 

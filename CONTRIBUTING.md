@@ -59,7 +59,7 @@ Obrigado pelo seu interesse em contribuir com o Horizon! Este documento fornece 
 
 ### Pré-requisitos
 
-- Go 1.22+
+- Go 1.26+
 - Git
 - Docker Desktop (opcional, para testes de integração e benchmarks)
 
@@ -121,9 +121,9 @@ go test -cover ./...
 
 ## Padrões de Código
 
-### Go 1.22
+### Go 1.26
 
-O projeto usa Go 1.22. Siga as convenções idiomáticas do Go:
+O projeto usa Go 1.26. Siga as convenções idiomáticas do Go:
 
 ```go
 // ✅ Bom - usar errors.New para erros simples

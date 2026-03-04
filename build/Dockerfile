@@ -6,7 +6,7 @@
 # =============================================================================
 
 # Build stage — runs on the HOST architecture for speed
-FROM --platform=$BUILDPLATFORM golang:1.22-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
 
 # Automatic ARGs injected by BuildKit
 ARG TARGETPLATFORM
@@ -40,7 +40,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 # =============================================================================
 # Optional: build Darwin binaries (extract with: docker buildx build --target=darwin-artifacts ...)
 # =============================================================================
-FROM --platform=$BUILDPLATFORM golang:1.22-alpine AS darwin-builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS darwin-builder
 
 WORKDIR /app
 COPY go.mod go.sum* ./
