@@ -2,6 +2,23 @@
 
 All notable changes to Horizon will be documented in this file.
 
+## [0.1.4] - 2026-03-04
+
+### ♻️ Refactoring
+
+- Update produce_benchmark.py to support remote brokers and improve latency tracking
+([6c96634](https://github.com/darioajr/horizon/commit/6c96634ee033b4074dd7f0731d40abf8ebe3143f))
+
+### 📚 Documentation
+
+- Update CHANGELOG.md for v0.1.3
+([a4b788c](https://github.com/darioajr/horizon/commit/a4b788c5f4ef0433149730df4fd008f62071f1b9))
+
+### 📝 Other
+
+- Merge branch 'main' of github.com:darioajr/horizon
+([1924dfe](https://github.com/darioajr/horizon/commit/1924dfef65eaefd7ac4d8e304e0fcba529dd6670))
+
 ## [0.1.3] - 2026-03-04
 
 ### 📚 Documentation
