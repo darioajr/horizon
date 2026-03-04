@@ -99,6 +99,10 @@ func (h *RequestHandler) handleFetch(req *Request) *Response {
 					fp.batches = batches
 					fp.errorCode = protocol.ErrNone
 				}
+				// Set high watermark from partition metadata
+				if pr, pErr := h.broker.GetPartition(topic, partition); pErr == nil {
+					fp.hwm = pr.HighWatermark()
+				}
 			}
 
 			ft.partitions = append(ft.partitions, fp)

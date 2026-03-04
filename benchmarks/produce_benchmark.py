@@ -450,7 +450,7 @@ Exemplos:
     if args.kafka_only or args.compare:
         console.print("\n[bold cyan]━━━ Apache Kafka (Testcontainer) ━━━[/bold cyan]")
         
-        with KafkaContainer("confluentinc/cp-kafka:7.5.0") as kafka:
+        with KafkaContainer("confluentinc/cp-kafka:8.1.1") as kafka:
             bootstrap_servers = kafka.get_bootstrap_server()
             console.print(f"[green]✓[/green] Kafka iniciado: {bootstrap_servers}")
             

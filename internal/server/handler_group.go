@@ -301,9 +301,7 @@ func (h *RequestHandler) handleLeaveGroup(req *Request) *Response {
 		w.WriteArrayLen(int32(len(memberResults)))
 		for _, mr := range memberResults {
 			w.WriteString(mr.memberID)
-			if req.ApiVersion >= 4 {
-				w.WriteNullableString(nil) // group_instance_id
-			}
+			w.WriteNullableString(nil) // group_instance_id (v3+)
 			w.WriteInt16(int16(mr.errorCode))
 		}
 	} else {

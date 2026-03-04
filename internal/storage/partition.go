@@ -286,6 +286,12 @@ func (p *Partition) Fetch(offset int64, maxBytes int64) ([]*RecordBatch, error) 
 		return nil, ErrOffsetOutOfRange
 	}
 
+	// If offset is at or beyond the high watermark, consumer is caught up — return empty, no error.
+	// Returning ErrOffsetOutOfRange here would cause clients to reset their offset and re-read.
+	if offset >= p.highWatermark {
+		return nil, nil
+	}
+
 	// Find the segment containing this offset
 	segment := p.findSegment(offset)
 	if segment == nil {

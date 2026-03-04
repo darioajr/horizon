@@ -23,24 +23,25 @@ func (h *RequestHandler) handleApiVersions(req *Request) *Response {
 	}
 
 	versions := []apiVersion{
-		{int16(protocol.ApiKeyProduce), 0, 8},         // v9+ uses flexible
-		{int16(protocol.ApiKeyFetch), 0, 11},          // v12+ uses flexible
-		{int16(protocol.ApiKeyListOffsets), 0, 5},
-		{int16(protocol.ApiKeyMetadata), 0, 8},        // v9+ uses flexible
-		{int16(protocol.ApiKeyOffsetCommit), 0, 7},    // v8+ uses flexible
-		{int16(protocol.ApiKeyOffsetFetch), 0, 7},
-		{int16(protocol.ApiKeyFindCoordinator), 0, 3},
-		{int16(protocol.ApiKeyJoinGroup), 0, 6},       // v7+ uses flexible
-		{int16(protocol.ApiKeyHeartbeat), 0, 3},       // v4+ uses flexible
-		{int16(protocol.ApiKeyLeaveGroup), 0, 4},
-		{int16(protocol.ApiKeySyncGroup), 0, 4},       // v5+ uses flexible
-		{int16(protocol.ApiKeyDescribeGroups), 0, 4},  // v5+ uses flexible
-		{int16(protocol.ApiKeyListGroups), 0, 3},      // v4+ uses flexible
-		{int16(protocol.ApiKeyApiVersions), 0, 2},     // v3+ uses flexible
-		{int16(protocol.ApiKeyCreateTopics), 0, 4},    // v5+ uses flexible
-		{int16(protocol.ApiKeyDeleteTopics), 0, 4},
-		{int16(protocol.ApiKeyInitProducerId), 0, 2},  // needed for idempotent producers
-		{int16(protocol.ApiKeyDeleteGroups), 0, 1},
+		{int16(protocol.ApiKeyProduce), 0, 8},            // v9+ uses flexible
+		{int16(protocol.ApiKeyFetch), 0, 11},             // v12+ uses flexible
+		{int16(protocol.ApiKeyListOffsets), 0, 5},         // v6+ uses flexible
+		{int16(protocol.ApiKeyMetadata), 0, 8},            // v9+ uses flexible
+		{int16(protocol.ApiKeyOffsetCommit), 0, 7},        // v8+ uses flexible
+		{int16(protocol.ApiKeyOffsetFetch), 0, 5},         // v6+ uses flexible
+		{int16(protocol.ApiKeyFindCoordinator), 0, 2},     // v3+ uses flexible
+		{int16(protocol.ApiKeyJoinGroup), 0, 5},           // v6+ uses flexible
+		{int16(protocol.ApiKeyHeartbeat), 0, 3},           // v4+ uses flexible
+		{int16(protocol.ApiKeyLeaveGroup), 0, 3},          // v4+ uses flexible
+		{int16(protocol.ApiKeySyncGroup), 0, 3},           // v4+ uses flexible
+		{int16(protocol.ApiKeyDescribeGroups), 0, 4},      // v5+ uses flexible
+		{int16(protocol.ApiKeyListGroups), 0, 2},          // v3+ uses flexible
+		{int16(protocol.ApiKeyApiVersions), 0, 2},         // v3+ uses flexible
+		{int16(protocol.ApiKeyCreateTopics), 0, 4},        // v5+ uses flexible
+		{int16(protocol.ApiKeyDeleteTopics), 0, 3},        // v4+ uses flexible
+		{int16(protocol.ApiKeyInitProducerId), 0, 1},      // v2+ uses flexible
+		{int16(protocol.ApiKeyDescribeConfigs), 0, 3},     // v4+ uses flexible
+		{int16(protocol.ApiKeyDeleteGroups), 0, 1},        // v2+ uses flexible
 	}
 
 	w.WriteArrayLen(int32(len(versions)))

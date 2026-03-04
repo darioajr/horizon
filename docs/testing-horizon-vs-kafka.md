@@ -1,6 +1,6 @@
 # Testing Horizon vs Kafka (KRaft) — Comparative Guide
 
-This guide shows how to run **Horizon** and **Kafka KRaft (single broker)** side by side in Docker, and use **Kafka's own CLI tools** (`kafka-topics.sh`, `kafka-console-producer.sh`, `kafka-console-consumer.sh`) to test both brokers identically — creating topics, producing messages, and consuming messages — while measuring the time of each operation.
+This guide shows how to run **Horizon** and **Kafka KRaft (single broker)** side by side in Docker, and use **Kafka's own CLI tools** (`kafka-topics`, `kafka-console-producer`, `kafka-console-consumer`) to test both brokers identically — creating topics, producing messages, and consuming messages — while measuring the time of each operation.
 
 ## Fair Network Setup
 
@@ -53,7 +53,6 @@ docker run -d \
   -p 9092:9092 \
   -p 8080:8080 \
   -e HORIZON_ADVERTISED_HOST=horizon-test \
-  -v horizon-test-data:/data \
   darioajr/horizon:latest
 
 # Verify
@@ -79,9 +78,9 @@ docker run -d \
   -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
   -e KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1 \
   -e KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1 \
-  -e KAFKA_LOG_DIRS=/tmp/kraft-combined-logs \
+  -e KAFKA_LOG_DIRS=/var/lib/kafka/data \
   -e CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk \
-  apache/kafka:3.8.0
+  confluentinc/cp-kafka:8.1.1
 
 # Wait for Kafka to be ready (~15s for JVM + KRaft init)
 sleep 15
@@ -97,14 +96,14 @@ docker run -d \
   --name kafka-tools \
   --network bench-net \
   --entrypoint sleep \
-  apache/kafka:3.8.0 \
+  confluentinc/cp-kafka:8.1.1 \
   infinity
 
 # Verify both brokers are reachable
-docker exec kafka-tools /opt/kafka/bin/kafka-broker-api-versions.sh \
+docker exec kafka-tools kafka-broker-api-versions \
   --bootstrap-server horizon-test:9092 2>&1 | head -1
 
-docker exec kafka-tools /opt/kafka/bin/kafka-broker-api-versions.sh \
+docker exec kafka-tools kafka-broker-api-versions \
   --bootstrap-server kafka-kraft-test:9092 2>&1 | head -1
 ```
 
@@ -121,17 +120,16 @@ Both connections follow the same path: Docker DNS → bridge network → target 
 
 ## 2. Test Scripts
 
-All scripts below use **only** the `.sh` tools from `/opt/kafka/bin/` inside the `kafka-tools` container, and access both brokers via their container names over the shared Docker network.
+All scripts below use **only** the Kafka CLI tools inside the `kafka-tools` container, and access both brokers via their container names over the shared Docker network.
 
 ### 2.1 Create Topics
 
 ```bash
 #!/bin/bash
-# test-create-topics.sh — Uses kafka-topics.sh for both brokers
+# test-create-topics.sh — Uses kafka-topics for both brokers
 
 TOPIC="benchmark-topic"
 PARTITIONS=3
-KAFKA_BIN="/opt/kafka/bin"
 TOOLS="kafka-tools"
 
 echo "============================================"
@@ -140,10 +138,10 @@ echo "============================================"
 
 # --- Horizon ---
 echo ""
-echo ">>> Horizon (via kafka-topics.sh → horizon-test:9092)"
+echo ">>> Horizon (via kafka-topics → horizon-test:9092)"
 START=$(date +%s%N)
 
-docker exec $TOOLS $KAFKA_BIN/kafka-topics.sh \
+docker exec $TOOLS kafka-topics \
   --bootstrap-server horizon-test:9092 \
   --create \
   --topic "$TOPIC" \
@@ -157,10 +155,10 @@ echo "   Time: ${ELAPSED_MS} ms"
 
 # --- Kafka ---
 echo ""
-echo ">>> Kafka KRaft (via kafka-topics.sh → kafka-kraft-test:9092)"
+echo ">>> Kafka KRaft (via kafka-topics → kafka-kraft-test:9092)"
 START=$(date +%s%N)
 
-docker exec $TOOLS $KAFKA_BIN/kafka-topics.sh \
+docker exec $TOOLS kafka-topics \
   --bootstrap-server kafka-kraft-test:9092 \
   --create \
   --topic "$TOPIC" \
@@ -180,7 +178,7 @@ echo "============================================"
 echo ""
 echo ">>> Horizon"
 START=$(date +%s%N)
-docker exec $TOOLS $KAFKA_BIN/kafka-topics.sh \
+docker exec $TOOLS kafka-topics \
   --bootstrap-server horizon-test:9092 --list
 END=$(date +%s%N)
 echo "   Time: $(( (END - START) / 1000000 )) ms"
@@ -188,7 +186,7 @@ echo "   Time: $(( (END - START) / 1000000 )) ms"
 echo ""
 echo ">>> Kafka KRaft"
 START=$(date +%s%N)
-docker exec $TOOLS $KAFKA_BIN/kafka-topics.sh \
+docker exec $TOOLS kafka-topics \
   --bootstrap-server kafka-kraft-test:9092 --list
 END=$(date +%s%N)
 echo "   Time: $(( (END - START) / 1000000 )) ms"
@@ -200,12 +198,12 @@ echo "============================================"
 
 echo ""
 echo ">>> Horizon"
-docker exec $TOOLS $KAFKA_BIN/kafka-topics.sh \
+docker exec $TOOLS kafka-topics \
   --bootstrap-server horizon-test:9092 --describe --topic "$TOPIC"
 
 echo ""
 echo ">>> Kafka KRaft"
-docker exec $TOOLS $KAFKA_BIN/kafka-topics.sh \
+docker exec $TOOLS kafka-topics \
   --bootstrap-server kafka-kraft-test:9092 --describe --topic "$TOPIC"
 ```
 
@@ -213,18 +211,17 @@ docker exec $TOOLS $KAFKA_BIN/kafka-topics.sh \
 
 ```bash
 #!/bin/bash
-# test-produce.sh — Uses kafka-console-producer.sh for both brokers
+# test-produce.sh — Uses kafka-console-producer for both brokers
 #
 # Usage: ./test-produce.sh [NUM_MESSAGES] [MESSAGE_SIZE_BYTES]
 
 TOPIC="benchmark-topic"
 NUM_MESSAGES=${1:-1000}
 MESSAGE_SIZE=${2:-1024}
-KAFKA_BIN="/opt/kafka/bin"
 TOOLS="kafka-tools"
 
 # Generate message file
-PAYLOAD=$(head -c "$MESSAGE_SIZE" /dev/urandom | base64 | head -c "$MESSAGE_SIZE")
+PAYLOAD=$(head -c "$MESSAGE_SIZE" /dev/urandom | base64 -w 0 | head -c "$MESSAGE_SIZE")
 TMPFILE=$(mktemp)
 for i in $(seq 1 "$NUM_MESSAGES"); do
   echo "$PAYLOAD" >> "$TMPFILE"
@@ -235,16 +232,16 @@ docker cp "$TMPFILE" $TOOLS:/tmp/messages.txt
 
 echo "============================================"
 echo "  PRODUCE $NUM_MESSAGES messages (${MESSAGE_SIZE} bytes each)"
-echo "  Using: kafka-console-producer.sh"
+echo "  Using: kafka-console-producer"
 echo "============================================"
 
 # --- Horizon ---
 echo ""
-echo ">>> Horizon (kafka-console-producer.sh → horizon-test:9092)"
+echo ">>> Horizon (kafka-console-producer → horizon-test:9092)"
 START=$(date +%s%N)
 
 docker exec $TOOLS bash -c \
-  "cat /tmp/messages.txt | $KAFKA_BIN/kafka-console-producer.sh \
+  "cat /tmp/messages.txt | kafka-console-producer \
     --bootstrap-server horizon-test:9092 \
     --topic $TOPIC"
 
@@ -257,11 +254,11 @@ echo "   Avg latency:   $(( H_MS / NUM_MESSAGES )) ms/msg"
 
 # --- Kafka ---
 echo ""
-echo ">>> Kafka KRaft (kafka-console-producer.sh → kafka-kraft-test:9092)"
+echo ">>> Kafka KRaft (kafka-console-producer → kafka-kraft-test:9092)"
 START=$(date +%s%N)
 
 docker exec $TOOLS bash -c \
-  "cat /tmp/messages.txt | $KAFKA_BIN/kafka-console-producer.sh \
+  "cat /tmp/messages.txt | kafka-console-producer \
     --bootstrap-server kafka-kraft-test:9092 \
     --topic $TOPIC"
 
@@ -287,29 +284,29 @@ printf "  %-15s  %6s msg/s  %6s msg/s\n" "Throughput" "$H_TPS" "$K_TPS"
 
 ```bash
 #!/bin/bash
-# test-consume.sh — Uses kafka-console-consumer.sh for both brokers
+# test-consume.sh — Uses kafka-console-consumer for both brokers
 #
 # Usage: ./test-consume.sh [TIMEOUT_SECONDS]
 
 TOPIC="benchmark-topic"
 TIMEOUT_SEC=${1:-10}
 TIMEOUT_MS=$((TIMEOUT_SEC * 1000))
-KAFKA_BIN="/opt/kafka/bin"
 TOOLS="kafka-tools"
 
 echo "============================================"
 echo "  CONSUME from topic: $TOPIC"
-echo "  Using: kafka-console-consumer.sh"
+echo "  Using: kafka-console-consumer"
 echo "  Timeout: ${TIMEOUT_SEC}s"
 echo "============================================"
 
 # --- Horizon ---
 echo ""
-echo ">>> Horizon (kafka-console-consumer.sh → horizon-test:9092)"
+echo ">>> Horizon (kafka-console-consumer → horizon-test:9092)"
 START=$(date +%s%N)
 
 H_COUNT=$(docker exec $TOOLS timeout $((TIMEOUT_SEC + 5)) \
-  $KAFKA_BIN/kafka-console-consumer.sh \
+  kafka-console-consumer \
+    --consumer-property group.protocol=classic \
     --bootstrap-server horizon-test:9092 \
     --topic "$TOPIC" \
     --from-beginning \
@@ -326,11 +323,12 @@ fi
 
 # --- Kafka ---
 echo ""
-echo ">>> Kafka KRaft (kafka-console-consumer.sh → kafka-kraft-test:9092)"
+echo ">>> Kafka KRaft (kafka-console-consumer → kafka-kraft-test:9092)"
 START=$(date +%s%N)
 
 K_COUNT=$(docker exec $TOOLS timeout $((TIMEOUT_SEC + 5)) \
-  $KAFKA_BIN/kafka-console-consumer.sh \
+  kafka-console-consumer \
+    --consumer-property group.protocol=classic \
     --bootstrap-server kafka-kraft-test:9092 \
     --topic "$TOPIC" \
     --from-beginning \
@@ -360,7 +358,7 @@ printf "  %-15s  %8s ms  %8s ms\n" "Time" "$H_MS" "$K_MS"
 #!/bin/bash
 # test-full-benchmark.sh
 # Complete benchmark: Horizon vs Kafka KRaft
-# Uses ONLY Kafka CLI tools (.sh) from /opt/kafka/bin/
+# Uses ONLY Confluent Kafka CLI tools
 # All connections go through Docker bridge network (fair comparison)
 #
 # Usage: ./test-full-benchmark.sh [NUM_MESSAGES] [MESSAGE_SIZE_BYTES]
@@ -370,7 +368,6 @@ set -e
 NUM_MESSAGES=${1:-1000}
 MESSAGE_SIZE=${2:-1024}
 TOPIC="bench-$(date +%s)"
-KAFKA_BIN="/opt/kafka/bin"
 TOOLS="kafka-tools"
 TIMEOUT_MS=10000
 
@@ -385,7 +382,7 @@ echo "╔═══════════════════════�
 echo "║     Horizon vs Kafka KRaft — Benchmark                      ║"
 echo "║     Messages: $NUM_MESSAGES | Size: ${MESSAGE_SIZE} bytes                    ║"
 echo "║     Topic: $TOPIC                                ║"
-echo "║     Tool: kafka CLI (.sh from /opt/kafka/bin/)               ║"
+echo "║     Tool: kafka CLI (Confluent Platform 8.1.1)               ║"
 echo "║     Network: bench-net (same path for both brokers)          ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
@@ -395,12 +392,12 @@ echo -e "${NC}"
 # ================================================================
 echo -e "${BLUE}[1/7] Checking services...${NC}"
 
-docker exec $TOOLS $KAFKA_BIN/kafka-broker-api-versions.sh \
+docker exec $TOOLS kafka-broker-api-versions \
   --bootstrap-server horizon-test:9092 > /dev/null 2>&1 \
   && echo "  ✓ Horizon OK (horizon-test:9092)" \
   || { echo "  ✗ Horizon not reachable at horizon-test:9092"; exit 1; }
 
-docker exec $TOOLS $KAFKA_BIN/kafka-broker-api-versions.sh \
+docker exec $TOOLS kafka-broker-api-versions \
   --bootstrap-server kafka-kraft-test:9092 > /dev/null 2>&1 \
   && echo "  ✓ Kafka KRaft OK (kafka-kraft-test:9092)" \
   || { echo "  ✗ Kafka KRaft not reachable at kafka-kraft-test:9092"; exit 1; }
@@ -408,9 +405,9 @@ docker exec $TOOLS $KAFKA_BIN/kafka-broker-api-versions.sh \
 # ================================================================
 # 2. Create topic on Horizon
 # ================================================================
-echo -e "\n${BLUE}[2/7] Creating topic on Horizon (kafka-topics.sh)...${NC}"
+echo -e "\n${BLUE}[2/7] Creating topic on Horizon (kafka-topics)...${NC}"
 START=$(date +%s%N)
-docker exec $TOOLS $KAFKA_BIN/kafka-topics.sh \
+docker exec $TOOLS kafka-topics \
   --bootstrap-server horizon-test:9092 \
   --create --topic "$TOPIC" --partitions 3 --replication-factor 1 \
   > /dev/null 2>&1
@@ -420,9 +417,9 @@ echo "  ✓ Horizon: ${H_CREATE} ms"
 # ================================================================
 # 3. Create topic on Kafka
 # ================================================================
-echo -e "\n${BLUE}[3/7] Creating topic on Kafka (kafka-topics.sh)...${NC}"
+echo -e "\n${BLUE}[3/7] Creating topic on Kafka (kafka-topics)...${NC}"
 START=$(date +%s%N)
-docker exec $TOOLS $KAFKA_BIN/kafka-topics.sh \
+docker exec $TOOLS kafka-topics \
   --bootstrap-server kafka-kraft-test:9092 \
   --create --topic "$TOPIC" --partitions 3 --replication-factor 1 \
   > /dev/null 2>&1
@@ -445,10 +442,10 @@ echo "  ✓ Messages ready"
 # ================================================================
 # 5. Produce to Horizon
 # ================================================================
-echo -e "\n${BLUE}[5/7] Producing to Horizon (kafka-console-producer.sh)...${NC}"
+echo -e "\n${BLUE}[5/7] Producing to Horizon (kafka-console-producer)...${NC}"
 START=$(date +%s%N)
 docker exec $TOOLS bash -c \
-  "cat /tmp/messages.txt | $KAFKA_BIN/kafka-console-producer.sh \
+  "cat /tmp/messages.txt | kafka-console-producer \
     --bootstrap-server horizon-test:9092 \
     --topic $TOPIC" 2>/dev/null
 H_PRODUCE=$(( ($(date +%s%N) - START) / 1000000 ))
@@ -458,10 +455,10 @@ echo "  ✓ Horizon: ${H_PRODUCE} ms (${H_PRODUCE_TPS} msg/s)"
 # ================================================================
 # 6. Produce to Kafka
 # ================================================================
-echo -e "\n${BLUE}[6/7] Producing to Kafka (kafka-console-producer.sh)...${NC}"
+echo -e "\n${BLUE}[6/7] Producing to Kafka (kafka-console-producer)...${NC}"
 START=$(date +%s%N)
 docker exec $TOOLS bash -c \
-  "cat /tmp/messages.txt | $KAFKA_BIN/kafka-console-producer.sh \
+  "cat /tmp/messages.txt | kafka-console-producer \
     --bootstrap-server kafka-kraft-test:9092 \
     --topic $TOPIC" 2>/dev/null
 K_PRODUCE=$(( ($(date +%s%N) - START) / 1000000 ))
@@ -471,12 +468,13 @@ echo "  ✓ Kafka: ${K_PRODUCE} ms (${K_PRODUCE_TPS} msg/s)"
 # ================================================================
 # 7. Consume from both
 # ================================================================
-echo -e "\n${BLUE}[7/7] Consuming messages (kafka-console-consumer.sh)...${NC}"
+echo -e "\n${BLUE}[7/7] Consuming messages (kafka-console-consumer)...${NC}"
 
 # Horizon
 START=$(date +%s%N)
 H_COUNT=$(docker exec $TOOLS timeout 30 \
-  $KAFKA_BIN/kafka-console-consumer.sh \
+  kafka-console-consumer \
+    --consumer-property group.protocol=classic \
     --bootstrap-server horizon-test:9092 \
     --topic "$TOPIC" \
     --from-beginning \
@@ -489,7 +487,8 @@ echo "  ✓ Horizon: $H_COUNT msgs in ${H_CONSUME} ms (${H_CONSUME_TPS} msg/s)"
 # Kafka
 START=$(date +%s%N)
 K_COUNT=$(docker exec $TOOLS timeout 30 \
-  $KAFKA_BIN/kafka-console-consumer.sh \
+  kafka-console-consumer \
+    --consumer-property group.protocol=classic \
     --bootstrap-server kafka-kraft-test:9092 \
     --topic "$TOPIC" \
     --from-beginning \
@@ -505,7 +504,7 @@ echo "  ✓ Kafka: $K_COUNT msgs in ${K_CONSUME} ms (${K_CONSUME_TPS} msg/s)"
 echo -e "\n${GREEN}"
 echo "╔══════════════════════════════════════════════════════════════════╗"
 echo "║                         RESULTS                                 ║"
-echo "║  Tool: kafka-console-producer.sh / kafka-console-consumer.sh    ║"
+echo "║  Tool: kafka-console-producer / kafka-console-consumer    ║"
 echo "║  Network: bench-net (symmetric path to both brokers)            ║"
 echo "╠══════════════════════════════════════════════════════════════════╣"
 echo "║                                                                 ║"
@@ -536,7 +535,6 @@ docker network create bench-net
 docker run -d --name horizon-test --network bench-net \
   -p 9092:9092 -p 8080:8080 \
   -e HORIZON_ADVERTISED_HOST=horizon-test \
-  -v horizon-test-data:/data \
   darioajr/horizon:latest
 
 # 3. Start Kafka KRaft
@@ -552,13 +550,13 @@ docker run -d --name kafka-kraft-test --network bench-net \
   -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
   -e KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1 \
   -e KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1 \
-  -e KAFKA_LOG_DIRS=/tmp/kraft-combined-logs \
+  -e KAFKA_LOG_DIRS=/var/lib/kafka/data \
   -e CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk \
-  apache/kafka:3.8.0
+  confluentinc/cp-kafka:8.1.1
 
 # 4. Start tools container
 docker run -d --name kafka-tools --network bench-net \
-  --entrypoint sleep apache/kafka:3.8.0 infinity
+  --entrypoint sleep confluentinc/cp-kafka:8.1.1 infinity
 
 # 5. Wait for Kafka JVM startup
 echo "Waiting for Kafka to start..."
@@ -589,89 +587,91 @@ sleep 20
 You can run individual Kafka CLI commands against either broker from the tools container:
 
 ```bash
-KAFKA_BIN="/opt/kafka/bin"
 TOOLS="kafka-tools"
 
 # ---------- CREATE TOPIC ----------
 # On Horizon
-docker exec $TOOLS $KAFKA_BIN/kafka-topics.sh \
+docker exec $TOOLS kafka-topics \
   --bootstrap-server horizon-test:9092 \
   --create --topic my-topic --partitions 3 --replication-factor 1
 
 # On Kafka
-docker exec $TOOLS $KAFKA_BIN/kafka-topics.sh \
+docker exec $TOOLS kafka-topics \
   --bootstrap-server kafka-kraft-test:9092 \
   --create --topic my-topic --partitions 3 --replication-factor 1
 
 # ---------- LIST TOPICS ----------
 # On Horizon
-docker exec $TOOLS $KAFKA_BIN/kafka-topics.sh \
+docker exec $TOOLS kafka-topics \
   --bootstrap-server horizon-test:9092 --list
 
 # On Kafka
-docker exec $TOOLS $KAFKA_BIN/kafka-topics.sh \
+docker exec $TOOLS kafka-topics \
   --bootstrap-server kafka-kraft-test:9092 --list
 
 # ---------- DESCRIBE TOPIC ----------
 # On Horizon
-docker exec $TOOLS $KAFKA_BIN/kafka-topics.sh \
+docker exec $TOOLS kafka-topics \
   --bootstrap-server horizon-test:9092 --describe --topic my-topic
 
 # On Kafka
-docker exec $TOOLS $KAFKA_BIN/kafka-topics.sh \
+docker exec $TOOLS kafka-topics \
   --bootstrap-server kafka-kraft-test:9092 --describe --topic my-topic
 
 # ---------- PRODUCE MESSAGES ----------
 # To Horizon (interactive — type messages, Ctrl+C to stop)
-docker exec -it $TOOLS $KAFKA_BIN/kafka-console-producer.sh \
+docker exec -it $TOOLS kafka-console-producer \
   --bootstrap-server horizon-test:9092 --topic my-topic
 
 # To Kafka
-docker exec -it $TOOLS $KAFKA_BIN/kafka-console-producer.sh \
+docker exec -it $TOOLS kafka-console-producer \
   --bootstrap-server kafka-kraft-test:9092 --topic my-topic
 
 # Pipe messages to Horizon
 echo -e "msg1\nmsg2\nmsg3" | docker exec -i $TOOLS \
-  $KAFKA_BIN/kafka-console-producer.sh \
+  kafka-console-producer \
   --bootstrap-server horizon-test:9092 --topic my-topic
 
 # Pipe messages to Kafka
 echo -e "msg1\nmsg2\nmsg3" | docker exec -i $TOOLS \
-  $KAFKA_BIN/kafka-console-producer.sh \
+  kafka-console-producer \
   --bootstrap-server kafka-kraft-test:9092 --topic my-topic
 
 # ---------- CONSUME MESSAGES ----------
 # From Horizon (from beginning, 5s timeout)
-docker exec $TOOLS $KAFKA_BIN/kafka-console-consumer.sh \
+docker exec $TOOLS kafka-console-consumer \
+  --consumer-property group.protocol=classic \
   --bootstrap-server horizon-test:9092 \
   --topic my-topic --from-beginning --timeout-ms 5000
 
 # From Kafka
-docker exec $TOOLS $KAFKA_BIN/kafka-console-consumer.sh \
+docker exec $TOOLS kafka-console-consumer \
+  --consumer-property group.protocol=classic \
   --bootstrap-server kafka-kraft-test:9092 \
   --topic my-topic --from-beginning --timeout-ms 5000
 
 # ---------- CONSUMER GROUP ----------
 # Consume with a group (Horizon)
-docker exec $TOOLS $KAFKA_BIN/kafka-console-consumer.sh \
+docker exec $TOOLS kafka-console-consumer \
+  --consumer-property group.protocol=classic \
   --bootstrap-server horizon-test:9092 \
   --topic my-topic --group test-group --from-beginning --timeout-ms 5000
 
 # List consumer groups (Horizon)
-docker exec $TOOLS $KAFKA_BIN/kafka-consumer-groups.sh \
+docker exec $TOOLS kafka-consumer-groups \
   --bootstrap-server horizon-test:9092 --list
 
 # Describe consumer group (Horizon)
-docker exec $TOOLS $KAFKA_BIN/kafka-consumer-groups.sh \
+docker exec $TOOLS kafka-consumer-groups \
   --bootstrap-server horizon-test:9092 --describe --group test-group
 
 # ---------- DELETE TOPIC ----------
 # On Horizon
-docker exec $TOOLS $KAFKA_BIN/kafka-topics.sh \
+docker exec $TOOLS kafka-topics \
   --bootstrap-server horizon-test:9092 --delete --topic my-topic
 
 # On Kafka
-docker exec $TOOLS $KAFKA_BIN/kafka-topics.sh \
+docker exec $TOOLS kafka-topics \
   --bootstrap-server kafka-kraft-test:9092 --delete --topic my-topic
 ```
 
@@ -685,32 +685,34 @@ Quick timing of individual operations using `time`:
 TOOLS="kafka-tools"
 
 # Time topic creation on Horizon
-time docker exec $TOOLS /opt/kafka/bin/kafka-topics.sh \
+time docker exec $TOOLS kafka-topics \
   --bootstrap-server horizon-test:9092 \
   --create --topic timed-test --partitions 3 --replication-factor 1
 
 # Time topic creation on Kafka
-time docker exec $TOOLS /opt/kafka/bin/kafka-topics.sh \
+time docker exec $TOOLS kafka-topics \
   --bootstrap-server kafka-kraft-test:9092 \
   --create --topic timed-test --partitions 3 --replication-factor 1
 
 # Time producing 1000 messages to Horizon
 time seq 1 1000 | docker exec -i $TOOLS \
-  /opt/kafka/bin/kafka-console-producer.sh \
+  kafka-console-producer \
   --bootstrap-server horizon-test:9092 --topic timed-test
 
 # Time producing 1000 messages to Kafka
 time seq 1 1000 | docker exec -i $TOOLS \
-  /opt/kafka/bin/kafka-console-producer.sh \
+  kafka-console-producer \
   --bootstrap-server kafka-kraft-test:9092 --topic timed-test
 
 # Time consuming from Horizon
-time docker exec $TOOLS /opt/kafka/bin/kafka-console-consumer.sh \
+time docker exec $TOOLS kafka-console-consumer \
+  --consumer-property group.protocol=classic \
   --bootstrap-server horizon-test:9092 \
   --topic timed-test --from-beginning --timeout-ms 5000 > /dev/null
 
 # Time consuming from Kafka
-time docker exec $TOOLS /opt/kafka/bin/kafka-console-consumer.sh \
+time docker exec $TOOLS kafka-console-consumer \
+  --consumer-property group.protocol=classic \
   --bootstrap-server kafka-kraft-test:9092 \
   --topic timed-test --from-beginning --timeout-ms 5000 > /dev/null
 ```
@@ -726,13 +728,9 @@ docker rm -f horizon-test kafka-kraft-test kafka-tools
 # Remove the network
 docker network rm bench-net
 
-# Remove volumes
-docker volume rm horizon-test-data
-
 # Remove everything at once
 docker rm -f horizon-test kafka-kraft-test kafka-tools && \
-docker network rm bench-net && \
-docker volume prune -f
+docker network rm bench-net
 ```
 
 ---
@@ -742,7 +740,7 @@ docker volume prune -f
 ```
 ╔══════════════════════════════════════════════════════════════════╗
 ║                         RESULTS                                 ║
-║  Tool: kafka-console-producer.sh / kafka-console-consumer.sh    ║
+║  Tool: kafka-console-producer / kafka-console-consumer    ║
 ║  Network: bench-net (symmetric path to both brokers)            ║
 ╠══════════════════════════════════════════════════════════════════╣
 ║                                                                 ║
@@ -758,7 +756,7 @@ docker volume prune -f
 ╚══════════════════════════════════════════════════════════════════╝
 ```
 
-> **Note:** Values above are illustrative. The Kafka CLI tools (`kafka-console-producer.sh`, etc.) add JVM startup overhead (~2-3 seconds) on each invocation, which affects both tests equally since the same tools and same network path are used for both brokers. Actual broker-level performance is higher than what these tools show.
+> **Note:** Values above are illustrative. The Kafka CLI tools (`kafka-console-producer`, etc.) add JVM startup overhead (~2-3 seconds) on each invocation, which affects both tests equally since the same tools and same network path are used for both brokers. Actual broker-level performance is higher than what these tools show.
 
 ---
 
@@ -767,11 +765,12 @@ docker volume prune -f
 | Tip | Description |
 |-----|-------------|
 | **Fair network path** | Both brokers are accessed from `kafka-tools` via Docker bridge — identical network overhead |
-| **JVM overhead** | Each `kafka-console-*.sh` invocation starts a JVM (~2-3s). This overhead is constant and applies to both tests equally |
+| **JVM overhead** | Each `kafka-console-*` invocation starts a JVM (~2-3s). This overhead is constant and applies to both tests equally |
 | **Symmetric testing** | Using the same tools container, same CLI, same network ensures methodology is identical |
 | **Cold start** | Horizon starts in ~100ms. Kafka KRaft needs 10-20s (JVM + controller init) |
 | **Memory** | Horizon: ~15MB RSS. Kafka KRaft: ~300-500MB (JVM) |
-| **Docker image size** | `darioajr/horizon`: ~15MB. `apache/kafka`: ~600MB |
+| **Docker image size** | `darioajr/horizon`: ~15MB. `confluentinc/cp-kafka`: ~900MB |
 | **Interactive mode** | Use `docker exec -it` (with `-it`) for interactive produce sessions where you type messages manually |
 | **Batch produce** | Pipe messages via `echo` or `cat` with `docker exec -i` (only `-i`, no `-t`) for batch mode |
 | **Advertised listeners** | Kafka's `ADVERTISED_LISTENERS` must use the container name (`kafka-kraft-test:9092`) so the client can reconnect after bootstrap |
+| **Classic consumer protocol** | Confluent Platform 8.x (Kafka 4.x) defaults to the new consumer group protocol (KIP-848). Horizon supports the classic protocol, so all consumer commands must include `--consumer-property group.protocol=classic` |

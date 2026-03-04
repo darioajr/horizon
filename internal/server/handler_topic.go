@@ -52,7 +52,7 @@ func (h *RequestHandler) handleCreateTopics(req *Request) *Response {
 		if err != nil {
 			if err == storage.ErrTopicExists {
 				r.errorCode = protocol.ErrTopicAlreadyExists
-				r.errorMsg = "Topic already exists"
+				r.errorMsg = "Topic '" + name + "' already exists."
 			} else {
 				r.errorCode = protocol.ErrUnknown
 				r.errorMsg = err.Error()

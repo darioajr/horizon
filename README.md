@@ -537,19 +537,20 @@ docker pull darioajr/horizon:0.1
 | Produce | 0 | 0-8 | ✅ Stable |
 | Fetch | 1 | 0-11 | ✅ Stable |
 | ListOffsets | 2 | 0-5 | ✅ Stable |
-| FindCoordinator | 10 | 0-3 | ✅ Stable |
-| JoinGroup | 11 | 0-6 | ✅ Stable |
-| SyncGroup | 14 | 0-4 | ✅ Stable |
+| FindCoordinator | 10 | 0-2 | ✅ Stable |
+| JoinGroup | 11 | 0-5 | ✅ Stable |
+| SyncGroup | 14 | 0-3 | ✅ Stable |
 | Heartbeat | 12 | 0-3 | ✅ Stable |
-| LeaveGroup | 13 | 0-4 | ✅ Stable |
+| LeaveGroup | 13 | 0-3 | ✅ Stable |
 | OffsetCommit | 8 | 0-7 | ✅ Stable |
-| OffsetFetch | 9 | 0-7 | ✅ Stable |
+| OffsetFetch | 9 | 0-5 | ✅ Stable |
 | DescribeGroups | 15 | 0-4 | ✅ Stable |
-| ListGroups | 16 | 0-3 | ✅ Stable |
+| ListGroups | 16 | 0-2 | ✅ Stable |
 | DeleteGroups | 42 | 0-1 | ✅ Stable |
 | CreateTopics | 19 | 0-4 | ✅ Stable |
-| DeleteTopics | 20 | 0-4 | ✅ Stable |
-| InitProducerId | 22 | 0-2 | ✅ Stable |
+| DeleteTopics | 20 | 0-3 | ✅ Stable |
+| InitProducerId | 22 | 0-1 | ✅ Stable |
+| DescribeConfigs | 32 | 0-3 | ✅ Stable |
 
 ## Configuration
 

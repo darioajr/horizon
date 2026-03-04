@@ -48,6 +48,8 @@ func (h *RequestHandler) HandleRequest(req *Request) *Response {
 		return h.handleDeleteTopics(req)
 	case protocol.ApiKeyInitProducerId:
 		return h.handleInitProducerId(req)
+	case protocol.ApiKeyDescribeConfigs:
+		return h.handleDescribeConfigs(req)
 	case protocol.ApiKeyDescribeGroups:
 		return h.handleDescribeGroups(req)
 	case protocol.ApiKeyListGroups:
