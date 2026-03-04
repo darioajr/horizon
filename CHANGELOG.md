@@ -2,6 +2,18 @@
 
 All notable changes to Horizon will be documented in this file.
 
+## [0.1.5] - 2026-03-04
+
+### 🐛 Bug Fixes
+
+- Specify golangci-lint version to v1.64.8 for consistency
+([a5d4b20](https://github.com/darioajr/horizon/commit/a5d4b20ebd94ba28ac4340f3b17675898665be59))
+
+### 📚 Documentation
+
+- Update CHANGELOG.md for v0.1.4
+([c034378](https://github.com/darioajr/horizon/commit/c034378858b1541fb944ac3c56d8667ec06bfb6f))
+
 ## [0.1.4] - 2026-03-04
 
 ### ♻️ Refactoring
