@@ -2,52 +2,24 @@
 
 All notable changes to Horizon will be documented in this file.
 
+## [0.1.3] - 2026-03-04
+
+### 📚 Documentation
+
+- Update CHANGELOG.md for v0.1.2
+([0bba848](https://github.com/darioajr/horizon/commit/0bba848fcc97954787dd1f8cf7ea165d18ce60d1))
+
+### 📦 Miscellaneous
+
+- Update Go version to 1.26 across workflows, documentation, and Docker configurations
+([8514416](https://github.com/darioajr/horizon/commit/8514416ce4a9cd64c97fbcaffc6eab001cbe8608))
+
 ## [0.1.2] - 2026-03-04
 
 ### 📚 Documentation
 
 - Update CHANGELOG.md for v0.1.1
 ([5bb4372](https://github.com/darioajr/horizon/commit/5bb4372bb0628b1b5d80a6ae4e4e2a576f8f8990))
-
-### 📝 Other
-
-- Remove unnecessary outputs from changelog job in release workflow
-([c8dc1bf](https://github.com/darioajr/horizon/commit/c8dc1bf1005b710fd65210b0d35907cc7579b7ba))
-- Merge branch 'main' of github.com:darioajr/horizon
-([b4dfe6a](https://github.com/darioajr/horizon/commit/b4dfe6af5d2d4afbe0f179d9a9ef09bb34f185fa))
-
-### 🚀 Features
-
-- Implement DescribeConfigs handler and update Kafka container version
-- Added handleDescribeConfigs function to process DescribeConfigs requests.
-    - Updated Kafka container version from 7.5.0 to 8.1.1 in benchmarks.
-    - Adjusted various API version handling and error messages for clarity.
-    - Enhanced Fetch request handling to return empty results when caught up.
-([cc2b4bd](https://github.com/darioajr/horizon/commit/cc2b4bdf3c58dcb09c8439ef1a806fecb96fa04f))
-
-## [0.1.1] - 2026-03-03
-
-### 📝 Other
-
-- Enhance release workflow: add changelog generation, update CHANGELOG.md, and improve badge visibility in README
-([311efe3](https://github.com/darioajr/horizon/commit/311efe3007c7c1841c00b723408281f441e2051c))
-- Update README.md: add FOSSA badge and reorganize contributing section
-([8b7a682](https://github.com/darioajr/horizon/commit/8b7a68260b08b03334ae9b3a20444f3762e427a0))
-- Update FOSSA badge in README.md to point to the correct project
-([eef85d8](https://github.com/darioajr/horizon/commit/eef85d8149a0d4b5ee30436c29e95b502f0356fd))
-- Add Docker usage instructions and configuration examples to README.md
-([7c79403](https://github.com/darioajr/horizon/commit/7c794030bb2cfc45be33f2758009623b79ecb1f6))
-- Enhance documentation and configuration for Docker usage
-
-- Add environment variable configuration details to README.md
-- Update configuration reference to include environment variables
-- Introduce a comparative testing guide for Horizon vs Kafka in new testing-horizon-vs-kafka.md
-- Improve examples and explanations for Docker usage in configuration.md
-([2b7e200](https://github.com/darioajr/horizon/commit/2b7e20045d6d20d5cca53c509f50f0c8445fc61f))
-- Fix remote URL macro in changelog configuration and set GitHub owner
-([c666ce4](https://github.com/darioajr/horizon/commit/c666ce4660b9e43bcfbab8f1765c6f622ceec6a8))
-
-## [0.1.0] - 2026-03-03
 
 ### 📝 Other
 
@@ -87,6 +59,36 @@ All notable changes to Horizon will be documented in this file.
 ([8d2ae9b](https://github.com/darioajr/horizon/commit/8d2ae9b4cc250dbaaca33494abd788a07180d7ec))
 - Refactor partition selection logic and remove unused code in cluster and server components
 ([f8dbf78](https://github.com/darioajr/horizon/commit/f8dbf78365c37de43c10f0e7fca1b66a4a28292b))
+- Enhance release workflow: add changelog generation, update CHANGELOG.md, and improve badge visibility in README
+([311efe3](https://github.com/darioajr/horizon/commit/311efe3007c7c1841c00b723408281f441e2051c))
+- Update README.md: add FOSSA badge and reorganize contributing section
+([8b7a682](https://github.com/darioajr/horizon/commit/8b7a68260b08b03334ae9b3a20444f3762e427a0))
+- Update FOSSA badge in README.md to point to the correct project
+([eef85d8](https://github.com/darioajr/horizon/commit/eef85d8149a0d4b5ee30436c29e95b502f0356fd))
+- Add Docker usage instructions and configuration examples to README.md
+([7c79403](https://github.com/darioajr/horizon/commit/7c794030bb2cfc45be33f2758009623b79ecb1f6))
+- Enhance documentation and configuration for Docker usage
+
+- Add environment variable configuration details to README.md
+- Update configuration reference to include environment variables
+- Introduce a comparative testing guide for Horizon vs Kafka in new testing-horizon-vs-kafka.md
+- Improve examples and explanations for Docker usage in configuration.md
+([2b7e200](https://github.com/darioajr/horizon/commit/2b7e20045d6d20d5cca53c509f50f0c8445fc61f))
+- Fix remote URL macro in changelog configuration and set GitHub owner
+([c666ce4](https://github.com/darioajr/horizon/commit/c666ce4660b9e43bcfbab8f1765c6f622ceec6a8))
+- Remove unnecessary outputs from changelog job in release workflow
+([c8dc1bf](https://github.com/darioajr/horizon/commit/c8dc1bf1005b710fd65210b0d35907cc7579b7ba))
+- Merge branch 'main' of github.com:darioajr/horizon
+([b4dfe6a](https://github.com/darioajr/horizon/commit/b4dfe6af5d2d4afbe0f179d9a9ef09bb34f185fa))
+
+### 🚀 Features
+
+- Implement DescribeConfigs handler and update Kafka container version
+- Added handleDescribeConfigs function to process DescribeConfigs requests.
+    - Updated Kafka container version from 7.5.0 to 8.1.1 in benchmarks.
+    - Adjusted various API version handling and error messages for clarity.
+    - Enhanced Fetch request handling to return empty results when caught up.
+([cc2b4bd](https://github.com/darioajr/horizon/commit/cc2b4bdf3c58dcb09c8439ef1a806fecb96fa04f))
 
 ---
 *Generated by [git-cliff](https://git-cliff.org)*
