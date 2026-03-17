@@ -220,7 +220,7 @@ Client → Connection → handleJoinGroup
 
 ## Deployment
 
-Horizon is distributed as a single static binary or a minimal Docker image (~15 MB) based on `alpine:3.19`. See `build/Dockerfile` for the multi-stage build that produces both Linux and Windows binaries.
+Horizon is distributed as a single static binary or a minimal container image (~15 MB) based on `alpine:3.19`, compatible with Docker and Podman. See `build/Dockerfile` for the multi-stage build that produces both Linux and Windows binaries.
 
 ```yaml
 # deployments/docker-compose.yml (standalone)

@@ -53,16 +53,16 @@ python produce_benchmark.py --compare --messages 1000000 --message-size 1024
 
 ## Pré-requisitos
 
-1. **Docker Desktop** rodando
-2. **Horizon** rodando em `localhost:9092` com `advertised-host` configurado para Docker
+1. **Docker Desktop** ou **Podman** rodando
+2. **Horizon** rodando em `localhost:9092` com `advertised-host` configurado para Docker/Podman
 
 ```powershell
-# Iniciar Horizon para benchmark com Docker (em outro terminal)
+# Iniciar Horizon para benchmark com Docker/Podman (em outro terminal)
 cd ..
 .\dist\horizon-windows-amd64.exe -advertised-host host.docker.internal
 ```
 
-> **Importante**: O flag `-advertised-host host.docker.internal` é necessário porque o container Docker precisa
+> **Importante**: O flag `-advertised-host host.docker.internal` é necessário porque o container Docker/Podman precisa
 > se conectar ao host Windows. Sem isso, o benchmark não consegue conectar ao broker.
 
 3. **Python 3.10+** (para script Python)
@@ -112,7 +112,7 @@ Os resultados são salvos em `./results/`:
 | `run-benchmark.ps1` | Script principal de benchmark |
 | `produce_benchmark.py` | Benchmark Python com rich output |
 | `requirements.txt` | Dependências Python |
-| `docker-compose-benchmark.yml` | Configuração Docker para Kafka e benchmarks |
+| `docker-compose-benchmark.yml` | Configuração Docker/Podman para Kafka e benchmarks |
 | `Dockerfile.benchmark` | OpenMessaging Benchmark builder |
 | `drivers/` | Configs de driver OpenMessaging |
 | `workloads/` | Workloads de benchmark |

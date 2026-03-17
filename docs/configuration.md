@@ -242,9 +242,9 @@ docker run -d --name horizon \
 
 ---
 
-## Docker Configuration
+## Docker / Podman Configuration
 
-When running in Docker, mount the config file and data volume:
+When running in Docker or Podman, mount the config file and data volume:
 
 ```bash
 docker run -d \
@@ -258,7 +258,7 @@ docker run -d \
   darioajr/horizon
 ```
 
-Or use Docker Compose:
+Or use Docker Compose / Podman Compose:
 
 ```yaml
 services:

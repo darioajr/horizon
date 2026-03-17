@@ -30,7 +30,7 @@ To ensure a fair comparison, all three containers share the same Docker network 
 
 ## Prerequisites
 
-- Docker installed
+- Docker or Podman installed
 - `bash` available (Linux/macOS/WSL/Git Bash)
 - Ports available: **9092** (Horizon), **9192** (Kafka)
 

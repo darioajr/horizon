@@ -162,7 +162,7 @@ defaults:
 
 ## Deployment Guide
 
-### 3-Node Docker Compose
+### 3-Node Docker / Podman Compose
 
 Create per-node config files:
 

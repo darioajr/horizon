@@ -61,7 +61,7 @@ Obrigado pelo seu interesse em contribuir com o Horizon! Este documento fornece 
 
 - Go 1.26+
 - Git
-- Docker Desktop (opcional, para testes de integração e benchmarks)
+- Docker Desktop ou Podman (opcional, para testes de integração e benchmarks)
 
 ### Build
 
@@ -76,7 +76,7 @@ go build -o horizon ./cmd/horizon
 # Build para todas as plataformas (via Make)
 make build-all
 
-# Build via Docker (cross-platform)
+# Build via Docker/Podman (cross-platform)
 make docker-build
 
 # Linux/macOS (via Bash)
@@ -98,7 +98,7 @@ go run ./cmd/horizon
 ./dist/horizon-linux-amd64          # Linux
 .\dist\horizon-windows-amd64.exe    # Windows
 
-# Com advertised-host para Docker
+# Com advertised-host para Docker/Podman
 ./dist/horizon-linux-amd64 -advertised-host host.docker.internal
 ```
 
@@ -437,9 +437,9 @@ horizon/
 │   ├── protocol/             # Protocolo Kafka (reader/writer)
 │   ├── server/               # Servidor TCP e handlers
 │   └── storage/              # Persistência (log, partições, segmentos)
-├── build/                    # Dockerfile
+├── build/                    # Dockerfile (Docker/Podman)
 ├── configs/                  # Arquivos de configuração
-├── deployments/              # Docker Compose
+├── deployments/              # Docker / Podman Compose
 ├── scripts/                  # Scripts de build e teste
 ├── benchmarks/               # Benchmarks de performance
 └── data/                     # Dados persistidos (runtime)

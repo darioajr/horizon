@@ -84,7 +84,8 @@ Detailed architecture and design documents are available in the [docs/](docs/) f
 ### Requirements
 
 - **Go 1.26+** (for local builds)
-- **Docker** and **Docker Compose** (optional, for containerized builds)
+- **Docker** or **Podman** (optional, for containerized builds)
+- **Docker Compose**, **Podman Compose**, or `docker compose` / `podman compose` plugin
 - **Make** (Linux/macOS) or **PowerShell** (Windows)
 
 ### Build & Run
@@ -115,7 +116,7 @@ make build
 # Run with custom config
 ./horizon -config configs/config.yaml
 
-# Run with Docker
+# Run with Docker or Podman
 docker run -d -p 9092:9092 -p 8080:8080 -p 9093:9093 -v horizon-data:/data --name horizon horizon:latest
 ```
 
@@ -158,7 +159,9 @@ msg, _ := reader.ReadMessage(context.Background())
 fmt.Println(string(msg.Value))
 ```
 
-## Docker
+## Docker / Podman
+
+> All `docker` commands below work identically with `podman`. The build scripts (`build.sh`, `build.ps1`) auto-detect the available container runtime.
 
 ### Quick Run
 
@@ -181,7 +184,7 @@ Horizon is now available on `localhost:9092` (Kafka protocol) and `localhost:808
 | Linux    | amd64       | `darioajr/horizon:latest` |
 | Linux    | arm64       | `darioajr/horizon:latest` |
 
-Docker automatically pulls the correct image for your architecture.
+Docker (and Podman) automatically pulls the correct image for your architecture.
 
 ### Ports
 
@@ -264,7 +267,7 @@ docker run -d --name horizon \
   darioajr/horizon
 ```
 
-### Storage Backends via Docker
+### Storage Backends via Docker / Podman
 
 #### File (default — no extra config needed)
 
@@ -402,7 +405,7 @@ performance:
   read_buffer_size: 65536      # 64 KB per connection
 ```
 
-### Docker Compose Examples
+### Docker Compose / Podman Compose Examples
 
 #### Single Node
 
@@ -510,7 +513,7 @@ volumes:
 curl http://localhost:8080/health
 ```
 
-Add to Docker Compose:
+Add to Docker Compose / Podman Compose:
 
 ```yaml
 services:
@@ -634,7 +637,7 @@ Horizon supports **multi-node clustering** for horizontal scalability and high a
 - **Data replication** – followers continuously fetch from leaders via TCP RPC
 - **Request routing** – produce/fetch requests are transparently forwarded to the correct leader
 
-### 3-Node Cluster with Docker Compose
+### 3-Node Cluster with Docker Compose / Podman Compose
 
 ```yaml
 # deployments/docker-compose-cluster.yml
@@ -698,9 +701,9 @@ horizon/
 │       ├── s3/               # S3 / MinIO backend
 │       ├── redis/            # Redis Streams backend
 │       └── infinispan/       # Infinispan REST API backend
-├── build/Dockerfile          # Multi-stage Docker build (ports 9092, 8080, 9093)
+├── build/Dockerfile          # Multi-stage container build (ports 9092, 8080, 9093)
 ├── configs/config.yaml       # Default configuration
-├── deployments/              # Docker Compose files
+├── deployments/              # Docker / Podman Compose files
 ├── docs/                     # Architecture & design documents
 ├── scripts/                  # Build & test scripts
 ├── benchmarks/               # Performance benchmarks
@@ -724,7 +727,7 @@ BenchmarkPartitionWrite-8  1000000   1102 ns/op    3.6 GB/s
 |---------|------------|
 | `.\scripts\build.ps1` | Build for current platform |
 | `.\scripts\build.ps1 -Target build-all` | Cross-compile for all platforms |
-| `.\scripts\build.ps1 -Target docker` | Build Docker image |
+| `.\scripts\build.ps1 -Target docker` | Build container image (Docker/Podman) |
 | `.\scripts\build.ps1 -Target test` | Run tests |
 | `.\scripts\build.ps1 -Target clean` | Clean build artifacts |
 
@@ -734,11 +737,11 @@ BenchmarkPartitionWrite-8  1000000   1102 ns/op    3.6 GB/s
 |---------|------------|
 | `./scripts/build.sh` | Build for current platform |
 | `./scripts/build.sh build-all` | Cross-compile for all platforms |
-| `./scripts/build.sh docker` | Build Docker image |
+| `./scripts/build.sh docker` | Build container image (Docker/Podman) |
 | `./scripts/build.sh test` | Run tests |
 | `./scripts/build.sh clean` | Clean build artifacts |
 | `make build` | Build (via Makefile) |
-| `make docker` | Docker image (via Makefile) |
+| `make docker` | Container image (via Makefile) |
 
 ## Contributing
 

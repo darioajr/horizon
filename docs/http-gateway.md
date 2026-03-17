@@ -285,15 +285,15 @@ Returns `404 Not Found` if the topic does not exist.
 
 ---
 
-## Docker
+## Docker / Podman
 
-The Dockerfile exposes both ports:
+The Dockerfile (compatible with Docker and Podman) exposes both ports:
 
 ```dockerfile
 EXPOSE 9092 8080
 ```
 
-Docker Compose example:
+Docker Compose / Podman Compose example:
 
 ```yaml
 services:
