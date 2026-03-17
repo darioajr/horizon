@@ -40,17 +40,22 @@ type Partition struct {
 
 	// Whether partition is closed
 	closed bool
+
+	// Adaptive write accumulator (nil when disabled)
+	accumulator *WriteAccumulator
 }
 
 // PartitionConfig holds configuration for a partition
 type PartitionConfig struct {
-	SegmentConfig SegmentConfig
+	SegmentConfig     SegmentConfig
+	AccumulatorConfig AccumulatorConfig
 }
 
 // DefaultPartitionConfig returns default partition configuration
 func DefaultPartitionConfig() PartitionConfig {
 	return PartitionConfig{
-		SegmentConfig: DefaultSegmentConfig(),
+		SegmentConfig:     DefaultSegmentConfig(),
+		AccumulatorConfig: DefaultAccumulatorConfig(),
 	}
 }
 
@@ -91,6 +96,11 @@ func NewPartition(dir, topic string, partition int32, config PartitionConfig) (*
 
 	// Set high watermark
 	p.highWatermark = p.activeSegment.NextOffset()
+
+	// Start adaptive write accumulator if enabled
+	if config.AccumulatorConfig.Enabled {
+		p.accumulator = NewWriteAccumulator(p, config.AccumulatorConfig)
+	}
 
 	return p, nil
 }
@@ -175,6 +185,19 @@ func (p *Partition) LogEndOffset() int64 {
 
 // AppendRaw writes raw record batch bytes to the partition without decode/re-encode.
 func (p *Partition) AppendRaw(data []byte, recordCount int32, maxTimestamp int64) (int64, error) {
+	// Fast path: delegate to the adaptive write accumulator when active.
+	// The accumulator coalesces concurrent writes into fewer syscalls and
+	// adapts its linger window to the current load level.
+	if p.accumulator != nil {
+		return p.accumulator.Submit(data, recordCount, maxTimestamp)
+	}
+
+	// Direct-write path (accumulator disabled).
+	return p.appendRawDirect(data, recordCount, maxTimestamp)
+}
+
+// appendRawDirect is the original non-accumulated write path.
+func (p *Partition) appendRawDirect(data []byte, recordCount int32, maxTimestamp int64) (int64, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -347,6 +370,12 @@ func (p *Partition) Close() error {
 	}
 
 	p.closed = true
+
+	// Stop the accumulator first so it drains pending writes.
+	if p.accumulator != nil {
+		p.accumulator.Stop()
+		p.accumulator = nil
+	}
 
 	for _, segment := range p.segments {
 		if err := segment.Close(); err != nil {

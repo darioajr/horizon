@@ -122,6 +122,9 @@ func main() {
 		DefaultNumPartitions:     int32(cfg.Defaults.NumPartitions),
 		DefaultReplicationFactor: int16(cfg.Defaults.ReplicationFactor),
 		AutoCreateTopics:         true,
+		AccumulatorEnabled:       cfg.Performance.AdaptiveLinger,
+		MaxLingerMicros:          int64(cfg.Performance.MaxLingerMicros),
+		MaxCoalesceBytes:         int64(cfg.Performance.MaxCoalesceBytes),
 	}
 
 	// Create storage engine based on configured backend

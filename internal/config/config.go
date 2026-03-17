@@ -94,10 +94,14 @@ type DefaultsConfig struct {
 
 // PerformanceConfig contains performance tuning settings
 type PerformanceConfig struct {
-	WriteBufferKB  int `yaml:"write_buffer_kb"`
-	MaxConnections int `yaml:"max_connections"`
-	IOThreads      int `yaml:"io_threads"`
-	ReadBufferSize int `yaml:"read_buffer_size"`
+	WriteBufferKB    int  `yaml:"write_buffer_kb"`
+	MaxConnections   int  `yaml:"max_connections"`
+	IOThreads        int  `yaml:"io_threads"`
+	ReadBufferSize   int  `yaml:"read_buffer_size"`
+	AdaptiveLinger   bool `yaml:"adaptive_linger"`    // Enable adaptive write coalescing (default: true)
+	MaxLingerMicros  int  `yaml:"max_linger_micros"`  // Upper bound of linger window in µs (default: 500)
+	MaxCoalesceBytes int  `yaml:"max_coalesce_bytes"` // Flush immediately above this (default: 1MB)
+	PipelineDepth    int  `yaml:"pipeline_depth"`     // Response pipeline depth per connection (default: 64)
 }
 
 // Default returns the default configuration
@@ -134,10 +138,14 @@ func Default() *Config {
 			ReplicationFactor: 1,
 		},
 		Performance: PerformanceConfig{
-			WriteBufferKB:  2048,
-			MaxConnections: 10000,
-			IOThreads:      4,
-			ReadBufferSize: 65536,
+			WriteBufferKB:    2048,
+			MaxConnections:   10000,
+			IOThreads:        4,
+			ReadBufferSize:   65536,
+			AdaptiveLinger:   true,
+			MaxLingerMicros:  500,
+			MaxCoalesceBytes: 1024 * 1024,
+			PipelineDepth:    64,
 		},
 	}
 }

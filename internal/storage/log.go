@@ -339,7 +339,7 @@ func (l *Log) GetTopicMetadata(topic string) (*TopicMetadata, error) {
 	return meta, nil
 }
 
-// Sync flushes all data to disk
+// Sync flushes all data to disk and resets dirty-byte counters.
 func (l *Log) Sync() error {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -353,9 +353,30 @@ func (l *Log) Sync() error {
 			if err := p.Sync(); err != nil {
 				return err
 			}
+			// Reset dirty counter after successful sync.
+			if p.accumulator != nil {
+				p.accumulator.DirtyBytes.Store(0)
+			}
 		}
 	}
 	return nil
+}
+
+// CollectDirtyBytes returns the total unflushed bytes across all partition
+// accumulators. Used by the broker's adaptive sync timer.
+func (l *Log) CollectDirtyBytes() int64 {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	var total int64
+	for _, partitions := range l.partitions {
+		for _, p := range partitions {
+			if p.accumulator != nil {
+				total += p.accumulator.DirtyBytes.Load()
+			}
+		}
+	}
+	return total
 }
 
 // Close closes all partitions

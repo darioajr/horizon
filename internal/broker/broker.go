@@ -46,6 +46,11 @@ type BrokerConfig struct {
 
 	// AutoCreateTopics enables auto topic creation
 	AutoCreateTopics bool
+
+	// Accumulator (adaptive write coalescing) settings
+	AccumulatorEnabled bool
+	MaxLingerMicros    int64
+	MaxCoalesceBytes   int64
 }
 
 // DefaultBrokerConfig returns default broker configuration
@@ -61,6 +66,9 @@ func DefaultBrokerConfig() BrokerConfig {
 		DefaultNumPartitions:     1,
 		DefaultReplicationFactor: 1,
 		AutoCreateTopics:         true,
+		AccumulatorEnabled:       true,
+		MaxLingerMicros:          500,
+		MaxCoalesceBytes:         1024 * 1024,
 	}
 }
 
@@ -114,8 +122,11 @@ type Broker struct {
 	// Round-robin counter for keyless partition assignment
 	rrCounter atomic.Int64
 
-	// Whether broker is running
-	running bool
+	// Whether broker is running (atomic for lock-free hot-path checks)
+	running atomic.Bool
+
+	// Whether auto-create topics is enabled (atomic for lock-free hot-path)
+	autoCreateTopics atomic.Bool
 
 	// Shutdown channel
 	shutdownCh chan struct{}
@@ -147,6 +158,11 @@ func New(config BrokerConfig, engine ...storage.StorageEngine) (*Broker, error) 
 					MaxBytes:           config.SegmentBytes,
 					IndexIntervalBytes: 4096,
 				},
+				AccumulatorConfig: storage.AccumulatorConfig{
+					Enabled:          config.AccumulatorEnabled,
+					MaxLingerMicros:  config.MaxLingerMicros,
+					MaxCoalesceBytes: config.MaxCoalesceBytes,
+				},
 			},
 		}
 
@@ -164,6 +180,7 @@ func New(config BrokerConfig, engine ...storage.StorageEngine) (*Broker, error) 
 		groupManager: NewGroupManager(),
 		shutdownCh:   make(chan struct{}),
 	}
+	b.autoCreateTopics.Store(config.AutoCreateTopics)
 
 	return b, nil
 }
@@ -173,11 +190,11 @@ func (b *Broker) Start() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.running {
+	if b.running.Load() {
 		return nil
 	}
 
-	b.running = true
+	b.running.Store(true)
 
 	// Start background tasks
 	go b.backgroundTasks()
@@ -188,11 +205,11 @@ func (b *Broker) Start() error {
 // Stop stops the broker
 func (b *Broker) Stop() error {
 	b.mu.Lock()
-	if !b.running {
+	if !b.running.Load() {
 		b.mu.Unlock()
 		return nil
 	}
-	b.running = false
+	b.running.Store(false)
 	close(b.shutdownCh)
 	b.mu.Unlock()
 
@@ -204,10 +221,23 @@ func (b *Broker) Stop() error {
 	return nil
 }
 
-// backgroundTasks runs periodic background tasks
+// backgroundTasks runs periodic background tasks with adaptive sync intervals.
+// Under light load, syncs every 5 seconds. Under heavy load, syncs more
+// frequently to bound the amount of data at risk.
 func (b *Broker) backgroundTasks() {
 	syncTicker := time.NewTicker(5 * time.Second)
 	defer syncTicker.Stop()
+
+	// Adaptive thresholds (bytes of dirty data ⇒ sync interval).
+	const (
+		lowThreshold  = 1 << 20  // 1 MB
+		highThreshold = 10 << 20 // 10 MB
+		fastInterval  = 200 * time.Millisecond
+		medInterval   = 1 * time.Second
+		slowInterval  = 5 * time.Second
+	)
+
+	currentInterval := slowInterval
 
 	for {
 		select {
@@ -215,27 +245,53 @@ func (b *Broker) backgroundTasks() {
 			return
 		case <-syncTicker.C:
 			_ = b.log.Sync()
+
+			// Adapt the interval based on dirty bytes across all
+			// partition accumulators.
+			dirty := b.collectDirtyBytes()
+			var desiredInterval time.Duration
+			switch {
+			case dirty > highThreshold:
+				desiredInterval = fastInterval
+			case dirty > lowThreshold:
+				desiredInterval = medInterval
+			default:
+				desiredInterval = slowInterval
+			}
+			if desiredInterval != currentInterval {
+				syncTicker.Reset(desiredInterval)
+				currentInterval = desiredInterval
+			}
 		}
 	}
+}
+
+// collectDirtyBytes sums unflushed bytes from all partition accumulators.
+func (b *Broker) collectDirtyBytes() int64 {
+	fbl, ok := b.log.(*storage.Log)
+	if !ok {
+		return 0
+	}
+	return fbl.CollectDirtyBytes()
 }
 
 // ProduceRaw writes raw record batch bytes to a topic partition
 // without decoding/re-encoding. This is the fast-path for produce requests.
 func (b *Broker) ProduceRaw(topic string, partition int32, data []byte, recordCount int32, maxTimestamp int64) (int64, error) {
-	// Single RLock for both running check and topic existence check
-	b.mu.RLock()
-	if !b.running {
-		b.mu.RUnlock()
+	// Lock-free running check via atomic (avoids RLock on every produce)
+	if !b.running.Load() {
 		return 0, fmt.Errorf("broker not running")
 	}
-	autoCreate := b.config.AutoCreateTopics
-	needCreate := autoCreate && b.topicConfigs[topic] == nil
-	b.mu.RUnlock()
 
-	// Auto-create topic only when missing (avoids second RLock in ensureTopic)
-	if needCreate {
-		if err := b.ensureTopic(topic); err != nil {
-			return 0, err
+	// Lock-free auto-create check
+	if b.autoCreateTopics.Load() {
+		b.mu.RLock()
+		needCreate := b.topicConfigs[topic] == nil
+		b.mu.RUnlock()
+		if needCreate {
+			if err := b.ensureTopic(topic); err != nil {
+				return 0, err
+			}
 		}
 	}
 
@@ -244,16 +300,11 @@ func (b *Broker) ProduceRaw(topic string, partition int32, data []byte, recordCo
 
 // Produce writes records to a topic partition
 func (b *Broker) Produce(topic string, partition int32, records []storage.Record) (int64, error) {
-	b.mu.RLock()
-	if !b.running {
-		b.mu.RUnlock()
+	if !b.running.Load() {
 		return 0, fmt.Errorf("broker not running")
 	}
-	autoCreate := b.config.AutoCreateTopics
-	b.mu.RUnlock()
 
-	// Auto-create topic if needed
-	if autoCreate {
+	if b.autoCreateTopics.Load() {
 		if err := b.ensureTopic(topic); err != nil {
 			return 0, err
 		}
@@ -272,13 +323,12 @@ func (b *Broker) Produce(topic string, partition int32, records []storage.Record
 //  2. storage engine metadata (covers topics that exist on disk/backend)
 //  3. DefaultNumPartitions (only when auto-creating a brand new topic)
 func (b *Broker) ProduceAutoPartition(topic string, key []byte, records []storage.Record) (partition int32, baseOffset int64, err error) {
-	b.mu.RLock()
-	if !b.running {
-		b.mu.RUnlock()
+	if !b.running.Load() {
 		return 0, 0, fmt.Errorf("broker not running")
 	}
-	autoCreate := b.config.AutoCreateTopics
+	autoCreate := b.autoCreateTopics.Load()
 	numPartitions := int32(0)
+	b.mu.RLock()
 	if tc := b.topicConfigs[topic]; tc != nil {
 		numPartitions = tc.NumPartitions
 	}
@@ -330,12 +380,9 @@ func (b *Broker) ProduceAutoPartition(topic string, key []byte, records []storag
 
 // Fetch reads records from a topic partition
 func (b *Broker) Fetch(topic string, partition int32, offset int64, maxBytes int64) ([]*storage.RecordBatch, error) {
-	b.mu.RLock()
-	if !b.running {
-		b.mu.RUnlock()
+	if !b.running.Load() {
 		return nil, fmt.Errorf("broker not running")
 	}
-	b.mu.RUnlock()
 
 	return b.log.Fetch(topic, partition, offset, maxBytes)
 }
@@ -345,7 +392,7 @@ func (b *Broker) CreateTopic(name string, numPartitions int32, replicationFactor
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if !b.running {
+	if !b.running.Load() {
 		return fmt.Errorf("broker not running")
 	}
 
@@ -383,7 +430,7 @@ func (b *Broker) DeleteTopic(name string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if !b.running {
+	if !b.running.Load() {
 		return fmt.Errorf("broker not running")
 	}
 
@@ -409,7 +456,7 @@ func (b *Broker) PurgeTopic(name string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if !b.running {
+	if !b.running.Load() {
 		return fmt.Errorf("broker not running")
 	}
 
@@ -438,7 +485,7 @@ func (b *Broker) UpdateTopicConfig(name string, retentionMs *int64, cleanupPolic
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if !b.running {
+	if !b.running.Load() {
 		return fmt.Errorf("broker not running")
 	}
 
@@ -525,7 +572,7 @@ func (b *Broker) GetMetadata(topics []string) (*ClusterMetadata, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	if !b.running {
+	if !b.running.Load() {
 		return nil, fmt.Errorf("broker not running")
 	}
 
@@ -605,12 +652,9 @@ func (b *Broker) GetMetadata(topics []string) (*ClusterMetadata, error) {
 
 // ListOffsets returns offsets for a partition
 func (b *Broker) ListOffsets(topic string, partition int32, timestamp int64) (int64, error) {
-	b.mu.RLock()
-	if !b.running {
-		b.mu.RUnlock()
+	if !b.running.Load() {
 		return 0, fmt.Errorf("broker not running")
 	}
-	b.mu.RUnlock()
 
 	p, err := b.log.GetPartition(topic, partition)
 	if err != nil {

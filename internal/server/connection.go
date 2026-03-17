@@ -3,7 +3,6 @@ package server
 import (
 	"bufio"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -16,6 +15,8 @@ const (
 	connReadBufSize = 64 * 1024
 	// connWriteBufSize is the write buffer size (64KB)
 	connWriteBufSize = 64 * 1024
+	// defaultPipelineDepth is the default response channel size.
+	defaultPipelineDepth = 64
 )
 
 // reqBufPool pools request data buffers to reduce GC pressure.
@@ -27,16 +28,23 @@ var reqBufPool = sync.Pool{
 	},
 }
 
+// pipelinedResponse pairs a response with its request buffer for deferred recycling.
+type pipelinedResponse struct {
+	resp   *Response
+	bufPtr *[]byte
+}
+
 // Connection represents a client connection
 type Connection struct {
-	id      int64
-	conn    net.Conn
-	reader  *bufio.Reader
-	writer  *bufio.Writer
-	handler *RequestHandler
-	closed  bool
-	mu      sync.Mutex
-	sizeBuf [4]byte // reusable buffer for size prefix
+	id            int64
+	conn          net.Conn
+	reader        *bufio.Reader
+	writer        *bufio.Writer
+	handler       *RequestHandler
+	closed        bool
+	mu            sync.Mutex
+	sizeBuf       [4]byte // reusable buffer for size prefix
+	pipelineDepth int     // response pipeline depth (0 = legacy sequential)
 }
 
 // NewConnection creates a new connection
@@ -46,37 +54,133 @@ func NewConnection(id int64, conn net.Conn, handler *RequestHandler) *Connection
 		_ = tc.SetNoDelay(true)
 	}
 	return &Connection{
-		id:      id,
-		conn:    conn,
-		reader:  bufio.NewReaderSize(conn, connReadBufSize),
-		writer:  bufio.NewWriterSize(conn, connWriteBufSize),
-		handler: handler,
+		id:            id,
+		conn:          conn,
+		reader:        bufio.NewReaderSize(conn, connReadBufSize),
+		writer:        bufio.NewWriterSize(conn, connWriteBufSize),
+		handler:       handler,
+		pipelineDepth: defaultPipelineDepth,
 	}
 }
 
-// Handle handles requests on the connection.
-// Sequential processing with buffered I/O provides optimal throughput
-// for the common case of single-partition requests (sticky partitioning).
+// NewConnectionWithPipeline creates a connection with a custom pipeline depth.
+func NewConnectionWithPipeline(id int64, conn net.Conn, handler *RequestHandler, depth int) *Connection {
+	c := NewConnection(id, conn, handler)
+	if depth > 0 {
+		c.pipelineDepth = depth
+	}
+	return c
+}
+
+// Handle handles requests on the connection using an adaptive pipeline.
+//
+// Two goroutines cooperate:
+//   - Reader goroutine: reads requests, dispatches to handler, sends
+//     responses to the pipeline channel.
+//   - Writer goroutine: drains the pipeline channel and flushes to the
+//     socket. It adaptively batches: only calls Flush() when no more
+//     responses are immediately available (or when the write buffer is
+//     large enough), achieving automatic coalescing under high load
+//     while maintaining low latency under light load.
 func (c *Connection) Handle() {
 	defer c.conn.Close()
 
+	respCh := make(chan pipelinedResponse, c.pipelineDepth)
+
+	// Writer goroutine — drains respCh and flushes adaptively.
+	var writerDone sync.WaitGroup
+	writerDone.Add(1)
+	go func() {
+		defer writerDone.Done()
+		c.writeLoop(respCh)
+	}()
+
+	// Reader goroutine (runs on this goroutine).
 	for {
 		req, err := c.readRequest()
 		if err != nil {
+			close(respCh)
+			writerDone.Wait()
 			return
 		}
 
 		resp := c.handler.HandleRequest(req)
 
-		// Return request buffer to pool
-		if req.bufPtr != nil {
-			reqBufPool.Put(req.bufPtr)
-			req.bufPtr = nil
-		}
+		respCh <- pipelinedResponse{resp: resp, bufPtr: req.bufPtr}
+		req.bufPtr = nil // ownership transferred to writer
+	}
+}
 
-		if err := c.writeResponse(resp); err != nil {
+// writeLoop is the writer goroutine. It writes responses and flushes
+// adaptively: if more responses are queued it keeps writing before
+// flushing, coalescing into fewer TCP segments under load.
+func (c *Connection) writeLoop(respCh <-chan pipelinedResponse) {
+	for pr := range respCh {
+		if err := c.writeResponseData(pr); err != nil {
+			// Drain remaining to unblock senders and recycle buffers.
+			for pr := range respCh {
+				c.recyclePipelined(pr)
+			}
 			return
 		}
+
+		// Adaptive flush: keep writing if more responses are queued.
+		flushed := false
+		for !flushed {
+			select {
+			case pr, ok := <-respCh:
+				if !ok {
+					// Channel closed — flush final data.
+					_ = c.writer.Flush()
+					return
+				}
+				if err := c.writeResponseData(pr); err != nil {
+					for pr := range respCh {
+						c.recyclePipelined(pr)
+					}
+					return
+				}
+			default:
+				// No more queued responses — flush now for low latency.
+				if err := c.writer.Flush(); err != nil {
+					return
+				}
+				flushed = true
+			}
+		}
+	}
+}
+
+// writeResponseData writes a single response to the buffered writer
+// (without flushing) and recycles its resources.
+func (c *Connection) writeResponseData(pr pipelinedResponse) error {
+	data := pr.resp.Writer.Bytes()
+
+	binary.BigEndian.PutUint32(c.sizeBuf[:], uint32(len(data)))
+	if _, err := c.writer.Write(c.sizeBuf[:]); err != nil {
+		c.recyclePipelined(pr)
+		return err
+	}
+	if _, err := c.writer.Write(data); err != nil {
+		c.recyclePipelined(pr)
+		return err
+	}
+
+	// Recycle resources.
+	pr.resp.Release()
+	if pr.bufPtr != nil {
+		reqBufPool.Put(pr.bufPtr)
+	}
+	return nil
+}
+
+// recyclePipelined returns pooled resources without writing.
+func (c *Connection) recyclePipelined(pr pipelinedResponse) {
+	if pr.resp != nil {
+		pr.resp.Release()
+	}
+	if pr.bufPtr != nil {
+		reqBufPool.Put(pr.bufPtr)
 	}
 }
 
@@ -125,31 +229,6 @@ func (c *Connection) readRequest() (*Request, error) {
 		Reader:        reader,
 		bufPtr:        bufPtr,
 	}, nil
-}
-
-// writeResponse writes a response to the connection
-func (c *Connection) writeResponse(resp *Response) error {
-	data := resp.Writer.Bytes()
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.closed {
-		return fmt.Errorf("connection closed")
-	}
-
-	// Write size prefix + data to buffered writer (single flush)
-	binary.BigEndian.PutUint32(c.sizeBuf[:], uint32(len(data)))
-	if _, err := c.writer.Write(c.sizeBuf[:]); err != nil {
-		return err
-	}
-	if _, err := c.writer.Write(data); err != nil {
-		return err
-	}
-	// Return writer to pool after data is written to bufio
-	resp.Release()
-	// Flush to socket
-	return c.writer.Flush()
 }
 
 // Close closes the connection

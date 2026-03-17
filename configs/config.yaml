@@ -68,3 +68,7 @@ performance:
   max_connections: 10000       # Maximum concurrent connections
   io_threads: 4                # I/O worker threads
   read_buffer_size: 65536      # Read buffer size per connection
+  adaptive_linger: true        # Enable adaptive write coalescing (auto-adjusts to load)
+  max_linger_micros: 500       # Upper bound of adaptive linger window (µs)
+  max_coalesce_bytes: 1048576  # Flush immediately above this many accumulated bytes (1MB)
+  pipeline_depth: 64           # Response pipeline depth per connection

@@ -518,13 +518,10 @@ func (s *Segment) Sync() error {
 		return ErrStorageClosed
 	}
 
-	if err := s.logFile.Sync(); err != nil {
-		return err
-	}
-	if err := s.indexFile.Sync(); err != nil {
-		return err
-	}
-	return s.timeIndexFile.Sync()
+	// Only fsync the log file. The index and time-index files are
+	// reconstructable from the log on recovery — same approach used by
+	// Apache Kafka. This reduces from 3 fsync syscalls to 1 per segment.
+	return s.logFile.Sync()
 }
 
 // Close closes the segment
