@@ -95,8 +95,16 @@ Detailed architecture and design documents are available in the [docs/](docs/) f
 
 # Windows – build local binary
 .\scripts\build.ps1
+```
 
-# Linux/macOS
+```bash
+# Linux/macOS – build Docker image
+./scripts/build.sh docker
+
+# Linux/macOS – build local binary
+./scripts/build.sh
+
+# Or using Make
 make build
 ```
 
@@ -710,6 +718,8 @@ BenchmarkPartitionWrite-8  1000000   1102 ns/op    3.6 GB/s
 
 ## Build Options
 
+### Windows (PowerShell)
+
 | Command | Description |
 |---------|------------|
 | `.\scripts\build.ps1` | Build for current platform |
@@ -717,8 +727,18 @@ BenchmarkPartitionWrite-8  1000000   1102 ns/op    3.6 GB/s
 | `.\scripts\build.ps1 -Target docker` | Build Docker image |
 | `.\scripts\build.ps1 -Target test` | Run tests |
 | `.\scripts\build.ps1 -Target clean` | Clean build artifacts |
-| `make build` | Build (Linux/macOS) |
-| `make docker` | Docker image (Linux/macOS) |
+
+### Linux/macOS (Bash)
+
+| Command | Description |
+|---------|------------|
+| `./scripts/build.sh` | Build for current platform |
+| `./scripts/build.sh build-all` | Cross-compile for all platforms |
+| `./scripts/build.sh docker` | Build Docker image |
+| `./scripts/build.sh test` | Run tests |
+| `./scripts/build.sh clean` | Clean build artifacts |
+| `make build` | Build (via Makefile) |
+| `make docker` | Docker image (via Makefile) |
 
 ## Contributing
 

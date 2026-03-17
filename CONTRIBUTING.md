@@ -79,6 +79,10 @@ make build-all
 # Build via Docker (cross-platform)
 make docker-build
 
+# Linux/macOS (via Bash)
+./scripts/build.sh build
+./scripts/build.sh docker-build
+
 # Windows (via PowerShell)
 .\scripts\build.ps1 -Target build
 .\scripts\build.ps1 -Target docker-build
@@ -112,6 +116,9 @@ go test -v ./internal/storage/
 
 # Com cobertura
 go test -cover ./...
+
+# Linux/macOS (via Bash)
+./scripts/build.sh test
 
 # Windows (via PowerShell)
 .\scripts\build.ps1 -Target test
