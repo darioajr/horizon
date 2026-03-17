@@ -17,6 +17,31 @@ COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "none")
 BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildDate=${BUILD_DATE}"
 
+# Detect container runtime (Docker or Podman)
+detect_container_runtime() {
+    if command -v docker &>/dev/null; then
+        CONTAINER_RT="docker"
+    elif command -v podman &>/dev/null; then
+        CONTAINER_RT="podman"
+    else
+        echo "Error: neither docker nor podman found in PATH" >&2
+        exit 1
+    fi
+
+    if command -v docker-compose &>/dev/null; then
+        COMPOSE_CMD="docker-compose"
+    elif "$CONTAINER_RT" compose version &>/dev/null 2>&1; then
+        COMPOSE_CMD="$CONTAINER_RT compose"
+    elif command -v podman-compose &>/dev/null; then
+        COMPOSE_CMD="podman-compose"
+    else
+        echo "Error: neither docker-compose, docker compose, nor podman-compose found" >&2
+        exit 1
+    fi
+
+    echo "Using container runtime: $CONTAINER_RT ($COMPOSE_CMD)"
+}
+
 write_header() {
     echo ""
     echo "=== $1 ==="
@@ -70,18 +95,21 @@ build_all() {
 }
 
 docker_build() {
-    write_header "Building all platforms using Docker"
-    docker-compose -f deployments/docker-compose.yml --profile build run --rm builder
+    detect_container_runtime
+    write_header "Building all platforms using $CONTAINER_RT"
+    $COMPOSE_CMD -f deployments/docker-compose.yml --profile build run --rm builder
 }
 
 docker_image() {
-    write_header "Building Docker image"
-    docker build -f build/Dockerfile -t "horizon:${VERSION}" -t horizon:latest .
+    detect_container_runtime
+    write_header "Building container image"
+    $CONTAINER_RT build -f build/Dockerfile -t "horizon:${VERSION}" -t horizon:latest .
 }
 
 docker_run() {
-    write_header "Starting Horizon in Docker"
-    docker-compose -f deployments/docker-compose.yml up -d horizon
+    detect_container_runtime
+    write_header "Starting Horizon in container"
+    $COMPOSE_CMD -f deployments/docker-compose.yml up -d horizon
     echo "Horizon is running. Access at localhost:9092"
 }
 

@@ -20,6 +20,34 @@ $COMMIT = try { git rev-parse --short HEAD 2>$null } catch { "none" }
 $BUILD_DATE = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 $LDFLAGS = "-s -w -X main.version=$Version -X main.commit=$COMMIT -X main.buildDate=$BUILD_DATE"
 
+# Detect container runtime (Docker or Podman)
+$script:ContainerRT = $null
+$script:ComposeCmd = $null
+
+function Detect-ContainerRuntime {
+    if (Get-Command docker -ErrorAction SilentlyContinue) {
+        $script:ContainerRT = "docker"
+    } elseif (Get-Command podman -ErrorAction SilentlyContinue) {
+        $script:ContainerRT = "podman"
+    } else {
+        Write-Host "Error: neither docker nor podman found in PATH" -ForegroundColor Red
+        exit 1
+    }
+
+    if (Get-Command docker-compose -ErrorAction SilentlyContinue) {
+        $script:ComposeCmd = "docker-compose"
+    } elseif (& $script:ContainerRT compose version 2>$null) {
+        $script:ComposeCmd = "$($script:ContainerRT) compose"
+    } elseif (Get-Command podman-compose -ErrorAction SilentlyContinue) {
+        $script:ComposeCmd = "podman-compose"
+    } else {
+        Write-Host "Error: neither docker-compose, docker compose, nor podman-compose found" -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "Using container runtime: $script:ContainerRT ($script:ComposeCmd)" -ForegroundColor Yellow
+}
+
 function Write-Header {
     param([string]$Message)
     Write-Host "`n=== $Message ===" -ForegroundColor Cyan
@@ -97,18 +125,21 @@ function Build-All {
 }
 
 function Docker-Build {
-    Write-Header "Building all platforms using Docker"
-    docker-compose -f deployments/docker-compose.yml --profile build run --rm builder
+    Detect-ContainerRuntime
+    Write-Header "Building all platforms using $script:ContainerRT"
+    & $script:ComposeCmd -f deployments/docker-compose.yml --profile build run --rm builder
 }
 
 function Docker-Image {
-    Write-Header "Building Docker image"
-    docker build -f build/Dockerfile -t "horizon:$Version" -t horizon:latest .
+    Detect-ContainerRuntime
+    Write-Header "Building container image"
+    & $script:ContainerRT build -f build/Dockerfile -t "horizon:$Version" -t horizon:latest .
 }
 
 function Docker-Run {
-    Write-Header "Starting Horizon in Docker"
-    docker-compose -f deployments/docker-compose.yml up -d horizon
+    Detect-ContainerRuntime
+    Write-Header "Starting Horizon in container"
+    & $script:ComposeCmd -f deployments/docker-compose.yml up -d horizon
     Write-Host "Horizon is running. Access at localhost:9092" -ForegroundColor Green
 }
 
