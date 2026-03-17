@@ -2,6 +2,29 @@
 
 All notable changes to Horizon will be documented in this file.
 
+## [0.1.6] - 2026-03-17
+
+### 📚 Documentation
+
+- Update CHANGELOG.md for v0.1.5
+([e6c4799](https://github.com/darioajr/horizon/commit/e6c47996a3f5bb8a778f70337984175a541c423a))
+
+### 📝 Other
+
+- Merge branch 'main' of github.com:darioajr/horizon
+([69cea19](https://github.com/darioajr/horizon/commit/69cea19460724b93ef1b04f1c78557c62284d7c0))
+
+### 🚀 Features
+
+- Add build script for Linux/macOS with multiple targets and Docker support
+([7a56770](https://github.com/darioajr/horizon/commit/7a56770a715ea966ea35e6ed6172b40f971a9973))
+- Add container runtime detection for Docker and Podman in build scripts
+([16f0d48](https://github.com/darioajr/horizon/commit/16f0d482b02a5d0ab640dd28c6aefe4ba9f35905))
+- Update documentation to support Podman alongside Docker
+([b0738cc](https://github.com/darioajr/horizon/commit/b0738cc97240dbca189ead4e6d4ff5235daecb5f))
+- Implement adaptive write coalescing with accumulator for improved performance
+([365ef0f](https://github.com/darioajr/horizon/commit/365ef0f6dbe3abf3f37cfc1f88464da4102b228a))
+
 ## [0.1.5] - 2026-03-04
 
 ### 🐛 Bug Fixes
