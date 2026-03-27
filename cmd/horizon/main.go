@@ -15,9 +15,6 @@ import (
 	"horizon/internal/config"
 	"horizon/internal/server"
 	"horizon/internal/storage"
-	infraS3 "horizon/internal/storage/s3"
-	infraRedis "horizon/internal/storage/redis"
-	infraInfinispan "horizon/internal/storage/infinispan"
 )
 
 var (
@@ -129,53 +126,17 @@ func main() {
 
 	// Create storage engine based on configured backend
 	var engine storage.StorageEngine
-	switch storage.BackendType(cfg.Storage.Backend) {
-	case storage.BackendS3:
-		s3Cfg := infraS3.Config{
-			Bucket:          cfg.Storage.S3.Bucket,
-			Prefix:          cfg.Storage.S3.Prefix,
-			Region:          cfg.Storage.S3.Region,
-			Endpoint:        cfg.Storage.S3.Endpoint,
-			AccessKey:       cfg.Storage.S3.AccessKey,
-			SecretKey:       cfg.Storage.S3.SecretKey,
-			SegmentMaxBytes: int64(cfg.Storage.SegmentSizeMB) * 1024 * 1024,
+	backendType := storage.BackendType(cfg.Storage.Backend)
+	if backendType != storage.BackendFile && backendType != "" {
+		factory, ok := backendRegistry[backendType]
+		if !ok {
+			log.Fatalf("Storage backend %q not available (not compiled in). Rebuild with: -tags %s", backendType, backendType)
 		}
-		engine, err = infraS3.New(s3Cfg)
+		engine, err = factory(cfg)
 		if err != nil {
-			log.Fatalf("Failed to create S3 storage engine: %v", err)
+			log.Fatalf("Failed to create %s storage engine: %v", backendType, err)
 		}
-		log.Printf("  Storage backend: S3 (bucket=%s)", s3Cfg.Bucket)
-
-	case storage.BackendRedis:
-		redisCfg := infraRedis.Config{
-			Addr:            cfg.Storage.Redis.Addr,
-			Password:        cfg.Storage.Redis.Password,
-			DB:              cfg.Storage.Redis.DB,
-			KeyPrefix:       cfg.Storage.Redis.KeyPrefix,
-			SegmentMaxBytes: int64(cfg.Storage.SegmentSizeMB) * 1024 * 1024,
-		}
-		engine, err = infraRedis.New(redisCfg)
-		if err != nil {
-			log.Fatalf("Failed to create Redis storage engine: %v", err)
-		}
-		log.Printf("  Storage backend: Redis (addr=%s)", redisCfg.Addr)
-
-	case storage.BackendInfinispan:
-		ispnCfg := infraInfinispan.Config{
-			URL:             cfg.Storage.Infinispan.URL,
-			CacheName:       cfg.Storage.Infinispan.CacheName,
-			Username:        cfg.Storage.Infinispan.Username,
-			Password:        cfg.Storage.Infinispan.Password,
-			SegmentMaxBytes: int64(cfg.Storage.SegmentSizeMB) * 1024 * 1024,
-		}
-		engine, err = infraInfinispan.New(ispnCfg)
-		if err != nil {
-			log.Fatalf("Failed to create Infinispan storage engine: %v", err)
-		}
-		log.Printf("  Storage backend: Infinispan (url=%s)", ispnCfg.URL)
-
-	default:
-		// Default: file-based storage (no extra setup needed; broker creates it)
+	} else {
 		log.Printf("  Storage backend: file (dir=%s)", cfg.Storage.DataDir)
 	}
 

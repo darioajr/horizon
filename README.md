@@ -730,6 +730,9 @@ BenchmarkPartitionWrite-8  1000000   1102 ns/op    3.6 GB/s
 | `.\scripts\build.ps1 -Target docker` | Build container image (Docker/Podman) |
 | `.\scripts\build.ps1 -Target test` | Run tests |
 | `.\scripts\build.ps1 -Target clean` | Clean build artifacts |
+| `.\scripts\build.ps1 -Compress` | Build with UPX binary compression |
+| `$env:BUILD_TAGS="s3"; .\scripts\build.ps1` | Build with only S3 backend |
+| `$env:BUILD_TAGS=""; .\scripts\build.ps1` | Build file-only (smallest binary) |
 
 ### Linux/macOS (Bash)
 
@@ -740,6 +743,9 @@ BenchmarkPartitionWrite-8  1000000   1102 ns/op    3.6 GB/s
 | `./scripts/build.sh docker` | Build container image (Docker/Podman) |
 | `./scripts/build.sh test` | Run tests |
 | `./scripts/build.sh clean` | Clean build artifacts |
+| `./scripts/build.sh --compress` | Build with UPX binary compression |
+| `BUILD_TAGS="s3" ./scripts/build.sh` | Build with only S3 backend |
+| `BUILD_TAGS="" ./scripts/build.sh` | Build file-only (smallest binary) |
 | `make build` | Build (via Makefile) |
 | `make docker` | Container image (via Makefile) |
 

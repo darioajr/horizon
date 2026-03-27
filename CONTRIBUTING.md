@@ -82,10 +82,14 @@ make docker-build
 # Linux/macOS (via Bash)
 ./scripts/build.sh build
 ./scripts/build.sh docker-build
+./scripts/build.sh --compress build     # with UPX compression
+BUILD_TAGS="s3" ./scripts/build.sh build # only S3 backend
 
 # Windows (via PowerShell)
 .\scripts\build.ps1 -Target build
 .\scripts\build.ps1 -Target docker-build
+.\scripts\build.ps1 -Target build -Compress           # with UPX compression
+$env:BUILD_TAGS="s3"; .\scripts\build.ps1 -Target build # only S3 backend
 ```
 
 ### Executar

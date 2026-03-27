@@ -6,6 +6,10 @@ COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(BUILD_DATE)"
 
+# Build tags for optional storage backends (e.g. "s3 redis infinispan" or "all_backends")
+BUILD_TAGS ?= all_backends
+TAG_FLAGS := $(if $(BUILD_TAGS),-tags '$(BUILD_TAGS)',)
+
 # Docker
 DOCKER_IMAGE ?= horizon
 DOCKER_PLATFORMS ?= linux/amd64,linux/arm64
@@ -17,25 +21,25 @@ all: build
 
 # Build for current platform
 build:
-	go build $(LDFLAGS) -o horizon ./cmd/horizon
+	CGO_ENABLED=0 go build -trimpath $(TAG_FLAGS) $(LDFLAGS) -o horizon ./cmd/horizon
 
 # Build for Linux
 build-linux:
 	@mkdir -p $(DIST)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(DIST)/horizon-linux-amd64 ./cmd/horizon
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(DIST)/horizon-linux-arm64 ./cmd/horizon
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath $(TAG_FLAGS) $(LDFLAGS) -o $(DIST)/horizon-linux-amd64 ./cmd/horizon
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath $(TAG_FLAGS) $(LDFLAGS) -o $(DIST)/horizon-linux-arm64 ./cmd/horizon
 
 # Build for Windows
 build-windows:
 	@mkdir -p $(DIST)
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(DIST)/horizon-windows-amd64.exe ./cmd/horizon
-	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build $(LDFLAGS) -o $(DIST)/horizon-windows-arm64.exe ./cmd/horizon
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath $(TAG_FLAGS) $(LDFLAGS) -o $(DIST)/horizon-windows-amd64.exe ./cmd/horizon
+	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath $(TAG_FLAGS) $(LDFLAGS) -o $(DIST)/horizon-windows-arm64.exe ./cmd/horizon
 
 # Build for macOS
 build-darwin:
 	@mkdir -p $(DIST)
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(DIST)/horizon-darwin-amd64 ./cmd/horizon
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(DIST)/horizon-darwin-arm64 ./cmd/horizon
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath $(TAG_FLAGS) $(LDFLAGS) -o $(DIST)/horizon-darwin-amd64 ./cmd/horizon
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath $(TAG_FLAGS) $(LDFLAGS) -o $(DIST)/horizon-darwin-arm64 ./cmd/horizon
 
 # Build for all platforms
 build-all: build-linux build-windows build-darwin

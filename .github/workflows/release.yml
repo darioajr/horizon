@@ -84,6 +84,9 @@ jobs:
           go-version: "1.26"
           cache: true
 
+      - name: Install UPX
+        run: sudo apt-get update && sudo apt-get install -y upx-ucl
+
       - name: Extract version from tag
         id: version
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
@@ -99,6 +102,8 @@ jobs:
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           go build \
+            -trimpath \
+            -tags "all_backends" \
             -ldflags="-s -w \
               -X main.version=${{ steps.version.outputs.VERSION }} \
               -X main.commit=${COMMIT} \
@@ -107,6 +112,13 @@ jobs:
             ./cmd/horizon
 
           echo "Built ${BINARY_NAME}"
+
+      - name: Compress binary with UPX
+        run: |
+          BINARY_NAME="horizon-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+          echo "Before: $(stat -c%s "dist/${BINARY_NAME}") bytes"
+          upx --best --lzma "dist/${BINARY_NAME}" || echo "UPX skipped (unsupported arch)"
+          echo "After:  $(stat -c%s "dist/${BINARY_NAME}") bytes"
 
       - name: Create archive
         run: |
@@ -328,5 +340,6 @@ jobs:
             VERSION=${{ steps.meta.outputs.VERSION }}
             COMMIT=${{ steps.meta.outputs.COMMIT }}
             BUILD_DATE=${{ steps.meta.outputs.BUILD_DATE }}
+            BUILD_TAGS=all_backends
           cache-from: type=gha
           cache-to: type=gha,mode=max
