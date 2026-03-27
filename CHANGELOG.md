@@ -2,6 +2,20 @@
 
 All notable changes to Horizon will be documented in this file.
 
+## [0.1.7] - 2026-03-27
+
+### 📚 Documentation
+
+- Update CHANGELOG.md for v0.1.6
+([ebd4da8](https://github.com/darioajr/horizon/commit/ebd4da823fe6d87e1cc059ec5bef49aee42c0b48))
+
+### 🚀 Features
+
+- Add UPX compression for binaries and support for multiple storage backends
+([87006b3](https://github.com/darioajr/horizon/commit/87006b3079f732b29cd321cdf23d91b983d0d3c9))
+- Add .golangci.yml configuration for build tags
+([0dcfccc](https://github.com/darioajr/horizon/commit/0dcfccc671d16ef039a580fb5db3ad3a3dfb471a))
+
 ## [0.1.6] - 2026-03-17
 
 ### 📚 Documentation
